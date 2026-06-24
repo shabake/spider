@@ -1,0 +1,15 @@
+name: deepseek-balance
+description: 查询 DeepSeek API 账户余额（CNY）
+trigger: DeepSeek|deepseek|余额|账单|balance|还有多少钱
+prompt: '当用户询问 DeepSeek 账户余额时，执行以下操作：
+
+
+  1. 运行脚本：`bash /Users/mac/Desktop/script/deepseek-balance.sh`
+
+  2. 将结果直接展示给用户，保持清晰的格式
+
+
+  脚本会调用 DeepSeek API 查询余额，返回总余额、赠送余额、充值余额和额度类型。'
+tools:
+- shell
+created: '2026-06-25'

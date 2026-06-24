@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 
 # 确保项目根目录在 PYTHONPATH 中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -51,6 +52,8 @@ if os.path.exists(static_dir):
 # 全局 Agent 实例
 _agent: Agent | None = None
 _memory: MemoryStore | None = None
+# Human-in-the-Loop 确认队列
+_pending_confirms: dict[str, asyncio.Future] = {}
 
 
 def get_agent() -> Agent:
@@ -172,6 +175,19 @@ async def event_stream(task: str):
         truncated = result[:2000]
         await event_queue.put(("tool_result", json.dumps({"name": name, "result": truncated}, ensure_ascii=False)))
 
+    async def on_confirm(message: str) -> bool:
+        """发送确认请求给前端，等待用户响应"""
+        confirm_id = str(uuid.uuid4())[:8]
+        future = asyncio.get_event_loop().create_future()
+        _pending_confirms[confirm_id] = future
+        await event_queue.put(("confirm", json.dumps({"message": message, "id": confirm_id}, ensure_ascii=False)))
+        try:
+            result = await asyncio.wait_for(future, timeout=120)
+            return result
+        except asyncio.TimeoutError:
+            _pending_confirms.pop(confirm_id, None)
+            return False
+
     async def on_done(content: str, elapsed: str):
         await event_queue.put(("done", json.dumps({"content": content, "elapsed": elapsed}, ensure_ascii=False)))
         await event_queue.put(None)  # 结束信号
@@ -187,6 +203,7 @@ async def event_stream(task: str):
         "tool_result": on_tool_result,
         "done": on_done,
         "error": on_error,
+        "confirm": on_confirm,
     }
 
     # 后台运行 agent
@@ -245,6 +262,19 @@ async def chat_stream(body: dict):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/api/chat/confirm")
+async def confirm_action(body: dict):
+    """Human-in-the-Loop: 用户确认/拒绝"""
+    confirm_id = body.get("confirm_id", "")
+    approved = body.get("approved", False)
+    future = _pending_confirms.get(confirm_id)
+    if future:
+        future.set_result(approved)
+        _pending_confirms.pop(confirm_id, None)
+        return {"status": "ok", "approved": approved}
+    return JSONResponse({"error": "确认请求已过期"}, status_code=404)
 
 
 @app.get("/api/conversations")

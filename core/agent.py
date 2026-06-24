@@ -29,12 +29,20 @@ logger = logging.getLogger("spider")
 class Agent:
     """Agent 核心引擎"""
 
-    SYSTEM_PROMPT = """你是一个名为 Spider 的 AI 助手。你有以下能力：
-1. 使用各种工具来完成任务
-2. 将复杂任务拆解为多个步骤
-3. 如需更多信息，主动询问用户
+    SYSTEM_PROMPT = """你是一个名为 Spider 的 AI 助手。
 
-始终用中文回复。思考过程保持简洁。"""
+你的核心能力：
+1. 使用各种工具来完成任务（文件读写、Shell 执行、代码搜索等）
+2. 将复杂任务拆解为多个步骤
+3. 通过子代理并行执行独立子任务
+4. 把有效经验保存为技能，下次复用
+5. 通过持久化记忆记住用户偏好和项目信息
+
+回复风格：
+- 用中文回复，保持自然、友好的语气
+- 思考过程保持简洁，直接展示结果
+- 使用 markdown 格式让回答结构清晰（标题、列表、代码块）
+- 回答完主动询问是否需要进一步帮助"""
 
     def __init__(self, model="deepseek-v4-flash", max_turns=30,
                  api_key=None, base_url=None, memory_store=None):
@@ -109,24 +117,15 @@ class Agent:
             {"role": "user", "content": task},
         ]
 
-    async def run(self, task: str, stream=True, on_event=None) -> str:
+    async def run(self, task: str, stream=True, on_event=None, cli=None) -> str:
         """
         主循环：思考 → 选工具 → 执行 → 观察 → 循环
 
         Args:
             task: 用户任务
             stream: 是否流式输出
-            on_event: 可选回调 dict，格式:
-                {
-                    "thinking_chunk": async callable(chunk: str),
-                    "thinking_done": async callable(content: str),
-                    "reasoning_chunk": async callable(chunk: str),
-                    "turn_start": async callable(turn: int, max_turns: int),
-                    "tool_call": async callable(name: str, args: dict),
-                    "tool_result": async callable(name: str, result: str),
-                    "done": async callable(content: str, elapsed: str),
-                    "error": async callable(msg: str),
-                }
+            on_event: 可选回调 dict (用于 Web UI)
+            cli: SpiderCLI 实例 (用于 CLI 模式)
 
         Returns:
             最终回复内容
@@ -141,23 +140,18 @@ class Agent:
             self._conv_id = self.memory.create_conversation(summary=task[:200])
             self.memory.save_message(self._conv_id, "user", task)
 
-        print(f"\n🧠 Spider — 开始处理任务")
-        print(f"{'='*50}")
         if on_event and on_event.get("turn_start"):
             await on_event["turn_start"](0, self.max_turns)
 
         for turn in range(self.max_turns):
             self._turn = turn + 1
-            print(f"\n--- Turn {self._turn}/{self.max_turns} ---")
             if on_event and on_event.get("turn_start"):
                 await on_event["turn_start"](self._turn, self.max_turns)
 
             if stream:
-                response = await self._think_stream(on_event=on_event)
+                response = await self._think_stream(on_event=on_event, cli=cli)
             else:
-                print("  🤔 思考中...", end="", flush=True)
                 response = await self._think()
-                print("\r" + " " * 20 + "\r", end="", flush=True)
 
             # LLM 决定结束
             if response["is_done"]:
@@ -171,14 +165,13 @@ class Agent:
                     )
                 elapsed = self._elapsed()
                 usage = response.get("usage")
-                print(f"\n{'='*50}")
-                print(f"✅ 任务完成 (用时 {elapsed})", end="")
-                if usage:
-                    print(f"  |  {usage}", end="")
-                print()  # 换行
-                # 非流式模式下内容还没显示过，在这里打印
-                if not stream and content:
-                    print(f"\n🕷️ {content}")
+
+                # CLI 模式：用 Markdown 渲染最终回复
+                if cli and not stream:
+                    cli.display_response(content)
+                elif cli and stream:
+                    cli.stream_done()
+
                 if on_event and on_event.get("done"):
                     await on_event["done"](content, elapsed)
                 return content
@@ -186,16 +179,20 @@ class Agent:
             # 执行工具
             tool_call_content = response.get("content", "")
             for tc in response["tool_calls"]:
-                args_str = json.dumps(tc["arguments"], ensure_ascii=False)
-                print(f"  🔧 {tc['name']}({args_str})")
+                if cli:
+                    cli.display_tool_call(tc["name"], tc["arguments"])
                 if on_event and on_event.get("tool_call"):
                     await on_event["tool_call"](tc["name"], tc["arguments"])
+
                 result = await self.tools.execute(tc)
-                print(f"  📦 结果: {result[:200]}{'...' if len(result) > 200 else ''}")
+
+                if cli:
+                    cli.display_tool_result(result)
                 if on_event and on_event.get("tool_result"):
                     await on_event["tool_result"](tc["name"], result)
 
                 # 将 tool call + result 加入对话
+                args_str = json.dumps(tc["arguments"], ensure_ascii=False)
                 msg = {
                     "role": "assistant",
                     "content": None,
@@ -215,19 +212,14 @@ class Agent:
                     "content": result,
                 })
 
-                # 持久化：保存 assistant 思考 + tool 结果
+                # 持久化
                 if self.memory and self._conv_id:
                     self.memory.save_message(
                         self._conv_id, "assistant",
                         tool_call_content,
-                        {"tool_calls": [{
-                            "name": tc["name"],
-                            "args": tc["arguments"],
-                        }]},
+                        {"tool_calls": [{"name": tc["name"], "args": tc["arguments"]}]},
                     )
-                    self.memory.save_message(
-                        self._conv_id, "tool", result,
-                    )
+                    self.memory.save_message(self._conv_id, "tool", result)
 
         # 达到最大轮数
         msg = f"⚠️ 达到最大轮数 ({self.max_turns})，任务可能未完成。"
@@ -238,12 +230,11 @@ class Agent:
         return msg
 
     async def _think(self) -> dict:
-        """非流式思考（不打印内容，由 run() 统一打印）"""
+        """非流式思考"""
         try:
             response = self.llm.think(self.messages, self.tools.schemas)
         except Exception as e:
             return {"content": f"思考出错: {e}", "tool_calls": [], "is_done": True}
-        # 不在这里打印，由 run() 统一在最后打印🕷️，避免重复
         result = {
             "content": response.content or "",
             "tool_calls": response.tool_calls,
@@ -254,20 +245,19 @@ class Agent:
             result["reasoning_content"] = response.reasoning_content
         return result
 
-    async def _think_stream(self, on_event=None) -> dict:
+    async def _think_stream(self, on_event=None, cli=None) -> dict:
         """流式思考"""
         accumulated = ""
         first_chunk = True
-
-        print("  🤔 思考中...", end="", flush=True)
 
         def on_content(chunk):
             nonlocal accumulated, first_chunk
             if first_chunk:
                 first_chunk = False
-                print("\r  💬 ", end="", flush=True)
             accumulated += chunk
-            print(chunk, end="", flush=True)
+            # CLI 模式直接输出
+            if cli:
+                cli.stream_response(chunk)
             if on_event and on_event.get("thinking_chunk"):
                 asyncio.create_task(on_event["thinking_chunk"](chunk))
 
@@ -276,20 +266,11 @@ class Agent:
 
         try:
             result = self.llm.think_stream(self.messages, self.tools.schemas,
-                                            on_content=on_content, on_tool=on_tool)
+                                           on_content=on_content, on_tool=on_tool)
         except Exception as e:
-            # 出错时如果还在"思考中"状态，清除它
-            if first_chunk:
-                print("\r" + " " * 20 + "\r", end="", flush=True)
             if on_event and on_event.get("error"):
                 asyncio.create_task(on_event["error"](f"思考出错: {e}"))
             return {"content": f"思考出错: {e}", "tool_calls": [], "is_done": True}
-
-        # 没收到任何内容但也没出错（空回复）
-        if first_chunk:
-            print("\r" + " " * 20 + "\r  💬 ", end="", flush=True)
-
-        print()  # 换行
 
         # 流式模式下 content 可能不完整，用 accumulated
         result["content"] = accumulated or result.get("content", "")

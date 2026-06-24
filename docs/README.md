@@ -19,7 +19,7 @@ Spider 是一个从零复刻 [Hermes Agent](https://github.com/NousResearch/herm
 cd /Users/mac/Desktop/Project/spider
 
 # 安装依赖
-pip install openai pyyaml fastapi uvicorn --break-system-packages
+pip install openai pyyaml rich fastapi uvicorn --break-system-packages
 
 # 设置 DeepSeek API Key
 export DEEPSEEK_API_KEY="sk-xxxx"
@@ -27,10 +27,10 @@ export DEEPSEEK_API_KEY="sk-xxxx"
 # 单次任务模式
 python main.py "帮我看看当前目录有哪些文件"
 
-# 交互式模式
+# 交互式模式（Claude Code 风格）
 python main.py -i
 
-# Web UI 模式 (浏览器访问 http://127.0.0.1:8888)
+# Web UI 模式（浏览器访问 http://127.0.0.1:8888）
 python main.py --web
 ```
 
@@ -41,25 +41,25 @@ spider/
 ├── main.py                    # CLI 入口 + --web 启动
 ├── core/                      # 核心引擎
 │   ├── agent.py               # Agent 循环 (ReAct)
-│   ├── llm.py                 # LLM 调用封装 (streaming + tool calls)
+│   ├── llm.py                 # LLM 调用封装 (streaming + tool calls + embedding)
 │   ├── tool_registry.py       # 工具注册中心
-│   ├── sub_agent.py           # 子代理系统 (Delegation) [P2]
-│   ├── skill_manager.py       # 技能系统 (Skill Manager) [P2]
-│   └── memory.py              # SQLite 持久化记忆 [P3]
-├── web/                       # Web UI [P3]
+│   ├── sub_agent.py           # 子代理系统 (Delegation)
+│   ├── skill_manager.py       # 技能系统 (Skill Manager)
+│   ├── memory.py              # SQLite 持久化记忆 (FTS5 + 向量语义搜索)
+│   └── cli.py                 # 终端渲染 (Rich 颜色 + Markdown)
+├── web/                       # Web UI
 │   ├── app.py                 # FastAPI 后端 + SSE 流
-│   ├── templates/index.html   # 聊天界面
-│   └── static/                # CSS + JS
+│   ├── templates/index.html   # 聊天界面 (Claude 风格)
+│   └── static/
+│       ├── css/style.css      # 深色主题样式
+│       └── js/chat.js         # 前端交互 (Markdown + 高亮)
 ├── tools/                     # 内置工具集
 │   ├── shell.py               # Shell 命令执行
 │   ├── read_write.py          # 文件读写操作
-│   └── convert.py             # 文档格式转换
+│   ├── convert.py             # 文档格式转换 (docx↔PDF)
+│   └── self_dev.py            # 自开发工具 (find/map/review/edit/commit)
 ├── skills/                    # 技能文件
 │   └── disk-check.yaml        # 示例技能
-├── web/                       # Web UI
-│   ├── app.py                 # FastAPI 后端
-│   ├── static/                # 前端静态资源
-│   └── templates/index.html   # 聊天界面
 ├── platforms/                 # 平台适配器 (预留)
 ├── docs/                      # 设计文档
 └── logs/conversations/        # 开发记录
@@ -92,8 +92,9 @@ spider/
 | 向量语义搜索 | embedding + cosine similarity 语义检索 |
 | FTS5 + LIKE | 关键词搜索作为语义的补充和保底 |
 | Web UI | FastAPI + SSE 实时聊天界面 |
+| Claude 风格前端 | Markdown 渲染、代码高亮、深色主题 |
 
-### ✅ Phase 3.5 — 自我开发能力 (已完成)
+### ✅ Phase 3.5 — 自开发能力 (已完成)
 
 | 功能 | 说明 |
 |------|------|
@@ -104,20 +105,19 @@ spider/
 | `self_edit()` | 安全修改代码：自动备份→替换→语法验证→失败回滚 |
 | `self_commit()` | 自动 git add → commit |
 
-### 📅 Phase 4 — 能力增强 (计划中)
+### 🔄 Phase 4 — 能力增强 (进行中)
 
-| 优先级 | 功能 | 说明 |
-|--------|------|------|
-| ⭐⭐⭐ | 人机交互中断 | Agent 执行关键操作前可等待用户确认/输入 |
-| ⭐⭐⭐ | 平台适配器 | 统一接口适配飞书、Discord、Web 等多端 |
-| ⭐⭐ | 工具权限体系 | 按风险等级分级：直接执行 / 需确认 / 禁止 |
-| ⭐⭐ | 多 LLM 切换 | 通过配置文件切换 DeepSeek / OpenAI / Claude 等 |
-| ⭐⭐ | Agent 状态序列化 | 中断恢复：Agent 可保存当前状态，下次继续 |
-| ⭐ | 配置管理 | YAML 配置文件替代环境变量散养 |
-| ⭐ | 插件化工具加载 | tools/ 目录下的 .py 自动注册为工具 |
-| ⭐ | 单元测试 | 为核心模块编写测试 |
-| ⭐ | 任务队列/调度 | 支持异步任务排队、定时触发 |
-| ⭐ | 人机协作模式 | 从全自主到半自动可配置，关键步骤交给人决策 |
+| 优先级 | 功能 | 说明 | 进度 |
+|--------|------|------|------|
+| ⭐⭐⭐ | 人机交互中断 | Agent 执行关键操作前可等待用户确认 | 🔄 后端基础完成 |
+| ⭐⭐⭐ | 平台适配器 | 统一接口适配飞书、Discord、Web 等多端 | 📅 计划中 |
+| ⭐⭐ | 工具权限体系 | 按风险等级分级：直接执行 / 需确认 / 禁止 | 📅 计划中 |
+| ⭐⭐ | 多 LLM 切换 | 通过配置文件切换 DeepSeek / OpenAI / Claude | 📅 计划中 |
+| ⭐⭐ | Agent 状态序列化 | 中断恢复：Agent 可保存当前状态 | 📅 计划中 |
+| ⭐ | 配置管理 | YAML 配置文件替代环境变量 | 📅 计划中 |
+| ⭐ | 插件化工具加载 | tools/ 下的 .py 自动注册 | 📅 计划中 |
+| ⭐ | 单元测试 | 为核心模块编写测试 | 📅 计划中 |
+| ⭐ | 任务队列/调度 | 异步任务排队、定时触发 | 📅 计划中 |
 
 ## 参考
 

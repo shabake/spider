@@ -12,8 +12,9 @@ Spider 的设计灵感来自 [Hermes Agent](https://github.com/NousResearch/herm
 | **流式输出** | `display.streaming` | `think_stream()` | 1 ✅ |
 | **子代理 (Delegation)** | `delegate_task` 工具 | `SubAgentPool` | 2 ✅ |
 | **技能系统 (Skill)** | `skills/` 目录 + 管理器 | `SkillManager` | 2 ✅ |
-| **平台适配** | `platforms/feishu` 等 | `PlatformAdapter` (规划中) | 3 📅 |
-| **记忆系统** | SQLite + Memory Store | `MemoryStore` (规划中) | 3 📅 |
+| **持久化记忆** | SQLite + 向量检索 | `MemoryStore` | 3 ✅ |
+| **平台适配** | `platforms/feishu` 等 | `PlatformAdapter` (规划中) | 4 📅 |
+| **人机交互中断** | `interrupt()` 等待用户确认 | `Agent.ask()` (进行中) | 4 🔄 |
 
 ---
 

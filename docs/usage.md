@@ -26,10 +26,11 @@ python3 main.py --web
 
 打开浏览器访问 `http://127.0.0.1:8888`，你会看到：
 
-- **聊天界面** — 输入任务，实时流式显示回复
+- **聊天界面** — 输入任务，实时流式显示回复（Markdown 渲染 + 代码高亮）
 - **工具调用卡片** — 每个工具调用都可展开查看参数和结果
 - **对话历史** — 侧边栏列出所有历史对话，可点击回顾
-- **深色主题** — 终端风格，护眼
+- **快捷建议** — 空状态时显示常用任务快捷按钮
+- **深色主题** — Claude 风格，护眼
 
 **可选参数：**
 ```bash
@@ -67,15 +68,26 @@ python3 main.py "用 delegate_task 分别查一下系统名称和当前时间"
 python3 main.py -i
 ```
 
-进入后可以看到 `🙋` 提示符，支持的命令：
+进入后看到 `>` 提示符，直接输入任务即可：
 
 ```
-🙋 帮我看看当前目录
-🙋 检查磁盘空间
-🙋 /tools      ← 查看可用工具
-🙋 /help       ← 查看帮助
-🙋 /quit       ← 退出
+> 帮我看看当前目录
+> 检查磁盘空间
+> /tools          ← 查看可用工具
+> /help           ← 查看帮助
+> /quit           ← 退出
+> quit            ← 直接退出也行
+> exit            ← 同上
+> 退出             ← 中文也行
 ```
+
+支持的命令：
+
+| 命令 | 说明 |
+|------|------|
+| `quit` / `exit` / `退出` | 退出交互模式 |
+| `/tools` | 查看所有可用工具 |
+| `/help` | 查看命令帮助 |
 
 ---
 
@@ -104,32 +116,42 @@ python3 main.py "你的任务"
 
 ## 启动后发生什么
 
+CLI 模式下：
+
+```
+> 你好
+
+你好！我是 **Spider**...
+
+  ⚡ read_file(path=test.txt)
+  └─ 文件内容: hello world
+
+>
+```
+
+Web UI 模式下：
+
+```
+你输入 → SSE 流 → AI 实时回复（Markdown）
+                → 工具调用卡片（可折叠）
+                → 完成标记
+```
+
+Agent 内部流程：
+
 ```
 你输入
-  │
-  ▼
-🧠 Spider — 开始处理任务
-==================================
   │
   ├─ 📚 自动匹配技能（如果有匹配的）
   │     └─ 例如 "检查磁盘空间" → 命中 disk-check 技能
   │
-  ├─ 💬 LLM 思考... （流式输出）
+  ├─ 🧠 自动 recall 相关记忆
   │
-  ├─ 🔧 调用工具（如有需要）
-  │     ├─ shell → 执行命令
-  │     ├─ read_file / write_file → 文件操作
-  │     ├─ docx_to_pdf / pdf_to_docx → 文档转换
-  │     └─ delegate_task → 委托子 Agent
+  ├─ 💬 LLM 思考 → 流式输出
+  │     ├─ 决定调用工具 → 执行 → 结果加入上下文 → 继续思考
+  │     └─ 决定结束 → 返回最终回复
   │
-  ├─ 📦 工具返回结果
-  │
-  └─ 继续思考 → 直到完成
-                    │
-                    ▼
-==================================
-✅ 任务完成 (用时 Xs)
-最终回复...
+  └─ 持久化：保存对话 + 记忆
 ```
 
 ---
@@ -172,18 +194,18 @@ python3 main.py "分别查一下系统版本、磁盘空间、内存使用"
 | `list_files` | 列出目录内容 | 内置 |
 | `docx_to_pdf` | Word 转 PDF | 扩展 |
 | `pdf_to_docx` | PDF 转 Word | 扩展 |
-| `delegate_task` | 委托子 Agent 执行任务 | Phase 2 |
-| `save_skill` | 保存当前方法为技能 | Phase 2 |
-| `list_skills` | 列出所有已保存技能 | Phase 2 |
-| `recall` | 搜索长期记忆 | Phase 3 |
-| `save_memory` | 保存关键信息到记忆 | Phase 3 |
-| `conversations` | 查看历史对话记录 | Phase 3 |
-| `self_map` | 【自开发】查看项目结构和模块职责 | Phase 3.5 |
-| `self_find` | 【自开发】源码语义搜索 | Phase 3.5 |
-| `self_validate` | 【自开发】语法检查 | Phase 3.5 |
-| `self_review` | 【自开发】git diff 代码审查 | Phase 3.5 |
-| `self_edit` | 【自开发】安全修改代码（备份→改→验→回滚） | Phase 3.5 |
-| `self_commit` | 【自开发】自动 git add + commit | Phase 3.5 |
+| `delegate_task` | 委托子 Agent 执行任务 | 子代理 |
+| `save_skill` | 保存当前方法为技能 | 技能系统 |
+| `list_skills` | 列出所有已保存技能 | 技能系统 |
+| `recall` | 搜索长期记忆 | 记忆系统 |
+| `save_memory` | 保存关键信息到记忆 | 记忆系统 |
+| `conversations` | 查看历史对话记录 | 记忆系统 |
+| `self_map` | 查看项目结构和模块职责 | 自开发 |
+| `self_find` | 源码语义搜索 | 自开发 |
+| `self_validate` | 语法检查 | 自开发 |
+| `self_review` | git diff 代码审查 | 自开发 |
+| `self_edit` | 安全修改代码（备份→改→验→回滚） | 自开发 |
+| `self_commit` | 自动 git add + commit | 自开发 |
 
 ---
 
@@ -195,7 +217,7 @@ python3 main.py "分别查一下系统版本、磁盘空间、内存使用"
 ### Q: 启动报错 "ModuleNotFoundError"
 → 缺少依赖，运行：
 ```bash
-pip3 install openai pyyaml python-docx PyMuPDF fpdf2 --break-system-packages
+pip3 install openai pyyaml rich python-docx PyMuPDF fpdf2 --break-system-packages
 ```
 
 ### Q: 启动后卡住不动
@@ -203,6 +225,9 @@ pip3 install openai pyyaml python-docx PyMuPDF fpdf2 --break-system-packages
 ```bash
 curl https://api.deepseek.com/v1/models -H "Authorization: Bearer $DEEPSEEK_API_KEY"
 ```
+
+### Q: WARNING 说 Embedding 失败
+→ 你的 API Key 没有 DeepSeek Embedding 权限，不影响使用。已自动降级为关键词搜索。
 
 ---
 
@@ -220,28 +245,6 @@ Claude Code 对话太长时会变慢，有两种方式解决：
 ```
 Claude Code 会自动压缩对话历史为摘要，保留关键上下文，减轻负担。
 
-**方式 2：新开会话**
+**方式 2：新开会诊**
 
-如果仍然想新开，不用担心丢失进度。所有项目资产都保存在本地：
-
-```
-~/Desktop/Project/spider/
-├── main.py              ← 入口（不会丢）
-├── core/                ← 全部代码（不会丢）
-├── tools/               ← 全部工具（不会丢）
-├── skills/              ← 技能文件（不会丢）
-├── docs/                ← 全部文档（不会丢）
-└── logs/conversations/  ← 开发记录（不会丢）
-```
-
-### 新会话如何快速接上
-
-新开 Claude Code 后，直接说：
-
-```
-打开 ~/Desktop/Project/spider 项目，
-读 docs/README.md 了解架构和当前进度，
-然后我们继续开发
-```
-
-Claude Code 会读文档，几分钟就回到状态。所有代码、技能、文档都在硬盘上，**不会丢失**。
+所有项目资产都保存在本地硬盘，不会丢失。

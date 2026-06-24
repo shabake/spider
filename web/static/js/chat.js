@@ -1,18 +1,29 @@
-/* Spider Web UI — 前端交互逻辑 */
+/* Spider Web UI — Claude 风格前端交互 */
 
 let currentAbortController = null;
 let currentConvId = null;
 let loadingHistory = false;
+let confirmResolver = null;  // 用于 Human-in-the-Loop 确认
+let streamContent = '';      // 流式内容累积
 
 // ── DOM 引用 ─────────────────────────────────
 
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
 const chatArea = $('#chat-area');
 const inputArea = $('#task-input');
 const sendBtn = $('#send-btn');
 const convList = $('#conv-list');
 const statusDot = $('#status-dot');
 const statusText = $('#status-text');
+const emptyState = $('#empty-state');
+
+// ── Markdown 配置 ───────────────────────────
+
+marked.setOptions({
+    breaks: true,
+    gfm: true,
+});
 
 // ── SSE 流式聊天 ─────────────────────────────
 
@@ -26,6 +37,7 @@ async function sendTask() {
     }
 
     setLoading(true);
+    hideEmptyState();
     appendMessage('user', task);
     inputArea.value = '';
     inputArea.style.height = 'auto';
@@ -34,15 +46,22 @@ async function sendTask() {
     const msgDiv = document.createElement('div');
     msgDiv.className = 'message assistant';
     msgDiv.id = 'stream-msg';
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = '🕷️ Spider';
+    msgDiv.appendChild(label);
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.id = 'stream-content';
+    // 添加打字指示器
+    bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
     msgDiv.appendChild(bubble);
     chatArea.appendChild(msgDiv);
     scrollToBottom();
 
     // 创建 abort controller
     currentAbortController = new AbortController();
+    streamContent = '';
 
     try {
         const response = await fetch('/api/chat/stream', {
@@ -80,7 +99,6 @@ async function sendTask() {
                 } else if (line.startsWith('data: ')) {
                     eventData = line.slice(6).trim();
                 } else if (line === '') {
-                    // 空行 = 事件结束
                     if (eventType && eventData) {
                         handleSSEEvent(eventType, eventData);
                     }
@@ -104,44 +122,49 @@ function handleSSEEvent(type, data) {
 
     switch (type) {
         case 'thinking_chunk': {
-            // HTML 转义后追加
-            const escaped = escapeHtml(data);
-            // 移除光标再追加
-            const cursorIdx = content.innerHTML.lastIndexOf('<span class="cursor"></span>');
-            if (cursorIdx !== -1) {
-                content.innerHTML = content.innerHTML.slice(0, cursorIdx);
-            }
-            content.innerHTML += escaped;
-            content.innerHTML += '<span class="cursor"></span>';
+            streamContent += data;
+            // 移除打字指示器
+            const typing = content.querySelector('.typing-indicator');
+            if (typing) typing.remove();
+            // 用 marked 渲染 markdown
+            const rendered = marked.parse(streamContent);
+            content.innerHTML = rendered;
+            // 高亮代码块
+            content.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
             scrollToBottom();
             break;
         }
 
         case 'thinking_done': {
-            // 移除光标
-            const cursorIdx = content.innerHTML.lastIndexOf('<span class="cursor"></span>');
-            if (cursorIdx !== -1) {
-                content.innerHTML = content.innerHTML.slice(0, cursorIdx);
-            }
+            // 最终内容已在 chunk 中累积，不需要额外处理
             break;
         }
 
         case 'turn_start': {
             const d = JSON.parse(data);
-            // 移除流式消息，显示思考中
             const streamMsg = document.getElementById('stream-msg');
             if (streamMsg && d.turn > 0) {
                 streamMsg.id = `msg-${Date.now()}`;
             }
-            // 新 turn 的思考气泡
             if (d.turn > 0) {
+                // 新 turn 显示思考中
                 const thinking = document.createElement('div');
-                thinking.className = 'thinking-bubble';
+                thinking.className = 'message assistant';
                 thinking.id = 'thinking-indicator';
-                thinking.innerHTML = `
-                    <span>🕷️ 思考中 (${d.turn}/${d.max_turns})</span>
-                    <div class="dot-pulse"><span></span><span></span><span></span></div>
+                const bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                bubble.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span>🤔 思考中</span>
+                        <span style="color:var(--text-muted);font-size:12px;">(第 ${d.turn}/${d.max_turns} 轮)</span>
+                        <div class="typing-indicator" style="display:inline-flex;">
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
                 `;
+                thinking.appendChild(bubble);
                 chatArea.appendChild(thinking);
                 scrollToBottom();
             }
@@ -149,8 +172,10 @@ function handleSSEEvent(type, data) {
         }
 
         case 'tool_call': {
-            // 移除思考气泡
             removeThinking();
+            // 移除流式消息的 ID，让它保留
+            const streamMsg = document.getElementById('stream-msg');
+            if (streamMsg) streamMsg.id = `msg-${Date.now()}`;
             const d = JSON.parse(data);
             appendToolCall(d.name, d.arguments, null);
             break;
@@ -158,7 +183,6 @@ function handleSSEEvent(type, data) {
 
         case 'tool_result': {
             const d = JSON.parse(data);
-            // 更新最后一个 tool call 的结果
             const lastTool = document.querySelector('.tool-call:last-child .tool-call-body');
             if (lastTool) {
                 const resultDiv = lastTool.querySelector('.result');
@@ -174,29 +198,26 @@ function handleSSEEvent(type, data) {
         case 'done': {
             const d = JSON.parse(data);
             removeThinking();
-            // 若 stream-bubble 还在，替换内容
-            const streamContent = document.getElementById('stream-content');
-            if (streamContent) {
-                // 移除光标
-                const cursorIdx = streamContent.innerHTML.lastIndexOf('<span class="cursor"></span>');
-                if (cursorIdx !== -1) {
-                    streamContent.innerHTML = streamContent.innerHTML.slice(0, cursorIdx);
-                }
-                if (!streamContent.textContent.trim()) {
-                    streamContent.textContent = d.content || '(无回复)';
+            const doneContent = document.getElementById('stream-content');
+            if (doneContent) {
+                const typing = doneContent.querySelector('.typing-indicator');
+                if (typing) typing.remove();
+                if (!doneContent.textContent.trim()) {
+                    doneContent.textContent = d.content || '(无回复)';
                 }
             }
-            if (d.elapsed) {
-                const elapsedDiv = document.createElement('div');
-                elapsedDiv.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:4px;text-align:right;';
-                elapsedDiv.textContent = `✅ 完成 (${d.elapsed})`;
-                const msg = document.getElementById('stream-msg');
-                if (msg) msg.appendChild(elapsedDiv);
-            }
-            // 重置消息 ID 防止重复
+            // 添加完成标记
             const streamMsg = document.getElementById('stream-msg');
-            if (streamMsg) streamMsg.id = `msg-${Date.now()}`;
-            // 刷新对话列表
+            if (streamMsg) {
+                streamMsg.id = `msg-${Date.now()}`;
+                if (d.elapsed) {
+                    const footer = document.createElement('div');
+                    footer.className = 'done-badge';
+                    footer.innerHTML = `<span class="check">✓</span> 完成 (${d.elapsed})`;
+                    streamMsg.appendChild(footer);
+                }
+            }
+            streamContent = '';
             refreshConversations();
             break;
         }
@@ -208,6 +229,13 @@ function handleSSEEvent(type, data) {
             if (streamMsg) streamMsg.remove();
             break;
         }
+
+        case 'confirm': {
+            // Human-in-the-Loop: 显示确认对话框
+            const d = JSON.parse(data);
+            showConfirmDialog(d.message, d.id);
+            break;
+        }
     }
 }
 
@@ -216,10 +244,25 @@ function handleSSEEvent(type, data) {
 function appendMessage(role, text) {
     const div = document.createElement('div');
     div.className = `message ${role}`;
-    div.innerHTML = `
-        <div class="label">${role === 'user' ? '🙋 你' : '🕷️ Spider'}</div>
-        <div class="bubble">${escapeHtml(text)}</div>
-    `;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = role === 'user' ? '🙋 你' : '🕷️ Spider';
+    div.appendChild(label);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
+    if (role === 'assistant') {
+        // 用 marked 渲染 markdown
+        const rendered = marked.parse(text);
+        bubble.innerHTML = rendered;
+        bubble.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+    } else {
+        bubble.textContent = text;
+    }
+
+    div.appendChild(bubble);
     chatArea.appendChild(div);
     scrollToBottom();
 }
@@ -236,7 +279,7 @@ function appendToolCall(name, args, result) {
         <div class="tool-call-body">
             <div class="args">${escapeHtml(JSON.stringify(args, null, 2))}</div>
             <div class="result-label">📦 结果</div>
-            <div class="result">${result ? escapeHtml(result) : '等待中...'}</div>
+            <div class="result">${result ? escapeHtml(result) : '<span style="color:var(--orange)">⏳ 执行中...</span>'}</div>
         </div>
     `;
     chatArea.appendChild(div);
@@ -255,11 +298,15 @@ function removeThinking() {
     if (t) t.remove();
 }
 
+function hideEmptyState() {
+    if (emptyState) emptyState.style.display = 'none';
+}
+
 function showError(msg) {
     const div = document.createElement('div');
     div.style.cssText = `
-        padding: 10px 14px; background: var(--red); color: #fff;
-        border-radius: 8px; margin-bottom: 12px; font-size: 13px;
+        padding: 10px 16px; background: var(--red); color: #fff;
+        border-radius: 8px; margin: 4px 20px 12px; font-size: 13px;
         text-align: center;
     `;
     div.textContent = `❌ ${msg}`;
@@ -269,27 +316,70 @@ function showError(msg) {
 
 function setLoading(loading) {
     sendBtn.disabled = loading;
-    sendBtn.textContent = loading ? '处理中...' : '发送';
     inputArea.disabled = loading;
     if (loading) {
-        statusDot.className = 'status-dot';
         statusDot.style.background = 'var(--orange)';
         statusText.textContent = '运行中';
     } else {
-        statusDot.className = 'status-dot';
         statusDot.style.background = 'var(--green)';
         statusText.textContent = '就绪';
     }
 }
 
 function scrollToBottom() {
-    chatArea.scrollTop = chatArea.scrollHeight;
+    requestAnimationFrame(() => {
+        chatArea.scrollTop = chatArea.scrollHeight;
+    });
 }
 
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ── Human-in-the-Loop 确认弹窗 ──────────────
+
+function showConfirmDialog(message, confirmId) {
+    const modal = document.getElementById('confirm-modal');
+    const msgEl = document.getElementById('confirm-message');
+    msgEl.textContent = message;
+    modal.style.display = 'flex';
+
+    return new Promise((resolve) => {
+        confirmResolver = { confirmId, resolve };
+
+        document.getElementById('confirm-ok').onclick = () => {
+            modal.style.display = 'none';
+            if (confirmResolver) {
+                confirmResolver.resolve(true);
+                confirmResolver = null;
+            }
+            // 发送确认结果回服务器
+            sendConfirmResponse(confirmId, true);
+        };
+
+        document.getElementById('confirm-cancel').onclick = () => {
+            modal.style.display = 'none';
+            if (confirmResolver) {
+                confirmResolver.resolve(false);
+                confirmResolver = null;
+            }
+            sendConfirmResponse(confirmId, false);
+        };
+    });
+}
+
+async function sendConfirmResponse(confirmId, approved) {
+    try {
+        await fetch('/api/chat/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirm_id: confirmId, approved }),
+        });
+    } catch (e) {
+        console.error('发送确认响应失败:', e);
+    }
 }
 
 // ── 对话历史 ─────────────────────────────────
@@ -308,7 +398,7 @@ async function refreshConversations() {
 function renderConversationList(convs) {
     convList.innerHTML = '';
     if (!convs || convs.length === 0) {
-        convList.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px;text-align:center;">暂无对话记录</div>';
+        convList.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:20px 16px;text-align:center;">暂无对话记录<br><span style="font-size:11px;">开始输入任务吧</span></div>';
         return;
     }
     for (const c of convs) {
@@ -342,21 +432,16 @@ async function loadConversation(id) {
         const conv = await res.json();
         currentConvId = id;
 
-        // 清空聊天区
         chatArea.innerHTML = '';
+        hideEmptyState();
+
         for (const msg of conv.messages) {
             if (msg.role === 'user') {
                 appendMessage('user', msg.content);
             } else if (msg.role === 'assistant') {
-                appendMessage('assistant', msg.content);
-            } else if (msg.role === 'tool') {
-                // 工具结果 — 依附上一条 assistant
+                appendMessage('assistant', msg.content || '(工具调用)');
             }
         }
-        // 更新侧边栏 active
-        document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
-        const activeItem = document.querySelector(`.conversation-item .summary`).closest('.conversation-item');
-        // 通过 data 标记来高亮
         highlightConvItem(id);
         scrollToBottom();
     } catch (e) {
@@ -378,6 +463,7 @@ async function deleteConversation(id) {
         if (currentConvId === id) {
             currentConvId = null;
             chatArea.innerHTML = '';
+            if (emptyState) emptyState.style.display = '';
         }
         refreshConversations();
     } catch (e) {

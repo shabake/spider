@@ -10,6 +10,7 @@
 | 2026-06-24 | Phase 1: 完成验证 | [查看](logs/conversations/2026-06-24_1750_phase1-complete.md) |
 | 2026-06-24 | Phase 2: 子代理 + 技能系统 | [查看](logs/conversations/2026-06-24_phase2-subagent-skill.md) |
 | 2026-06-24 | Phase 3: Web UI (FastAPI + SSE) | 本文档记录 |
+| 2026-06-24 | Phase 4a: UI 大升级 + Human-in-the-Loop | CLI 极简重构 + Web Claude 风格 + HITL 基础 |
 
 ## 如何记录
 

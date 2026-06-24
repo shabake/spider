@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spider — Web UI</title>
     <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Markdown 渲染 + 代码高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -15,10 +20,21 @@
                 <h2>🕷️ Spider</h2>
                 <button class="sidebar-toggle" onclick="toggleSidebar()" title="收起侧边栏">◀</button>
             </div>
+
+            <!-- 设置面板 -->
+            <div class="settings-panel" id="settings-panel">
+                <label>API Key</label>
+                <input type="password" id="api-key-input" placeholder="sk-..." />
+                <label style="margin-top:8px;">Base URL</label>
+                <input type="text" id="base-url-input" value="https://api.deepseek.com/v1" />
+            </div>
+
+            <div class="conv-header">
+                <span>💬 对话历史</span>
+                <button class="new-chat-btn" onclick="newChat()" title="新建对话">✕</button>
+            </div>
             <div class="conversation-list" id="conv-list">
-                <div style="color:var(--text-muted);font-size:13px;padding:16px;text-align:center;">
-                    加载中...
-                </div>
+                <div class="conv-loading">加载中...</div>
             </div>
         </aside>
 
@@ -27,14 +43,32 @@
 
             <!-- 顶部栏 -->
             <header class="top-bar">
-                <button class="sidebar-toggle" onclick="toggleSidebar()" style="background:none;border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;padding:4px 8px;border-radius:6px;font-size:14px;">☰</button>
-                <span class="spider-icon">🕷️</span>
-                <h1>Spider Agent</h1>
-                <div class="status">
-                    <span class="status-dot" id="status-dot"></span>
-                    <span id="status-text">连接中...</span>
+                <button class="menu-btn" onclick="toggleSidebar()" title="切换侧边栏">☰</button>
+                <div class="brand">
+                    <span class="brand-icon">🕷️</span>
+                    <span class="brand-name">Spider</span>
+                </div>
+                <div class="top-actions">
+                    <button class="top-btn" onclick="toggleSettings()" title="设置">⚙️</button>
+                    <div class="status">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="status-text">就绪</span>
+                    </div>
                 </div>
             </header>
+
+            <!-- 空状态 -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-icon">🕷️</div>
+                <div class="empty-title">开始新的对话</div>
+                <div class="empty-hint">输入任务，Spider 会调用工具帮你完成</div>
+                <div class="empty-suggestions">
+                    <button class="suggestion-chip" onclick="quickTask('查看当前目录有哪些文件')">📂 查看目录</button>
+                    <button class="suggestion-chip" onclick="quickTask('系统磁盘空间使用情况')">💾 磁盘空间</button>
+                    <button class="suggestion-chip" onclick="quickTask('Python 项目结构分析')">📊 项目分析</button>
+                    <button class="suggestion-chip" onclick="quickTask('帮我写一个简单的 Python HTTP 服务器')">🐍 写代码</button>
+                </div>
+            </div>
 
             <!-- 聊天区 -->
             <div class="chat-area" id="chat-area"></div>
@@ -43,9 +77,14 @@
             <div class="input-area">
                 <div class="input-row">
                     <textarea id="task-input"
-                              placeholder="输入任务，例如：查看当前目录有哪些文件..."
+                              placeholder="给 Spider 布置任务..."
                               rows="1"></textarea>
-                    <button id="send-btn">发送</button>
+                    <button id="send-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
                 </div>
                 <div class="input-hint">Enter 发送 · Shift+Enter 换行</div>
             </div>
@@ -53,10 +92,38 @@
         </main>
     </div>
 
+    <!-- 确认弹窗 -->
+    <div class="modal-overlay" id="confirm-modal" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">🕷️ 需要确认</div>
+            <div class="modal-body" id="confirm-message"></div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" id="confirm-cancel">取消</button>
+                <button class="modal-btn modal-btn-confirm" id="confirm-ok">继续</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/chat.js"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+        function toggleSettings() {
+            document.getElementById('settings-panel').classList.toggle('open');
+        }
+        function newChat() {
+            document.getElementById('chat-area').innerHTML = '';
+            document.getElementById('empty-state').style.display = '';
+            document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+            if (window.currentConvId) window.currentConvId = null;
+        }
+        function quickTask(text) {
+            const input = document.getElementById('task-input');
+            input.value = text;
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+            if (window.sendTask) window.sendTask();
         }
     </script>
 </body>

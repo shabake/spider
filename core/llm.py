@@ -137,7 +137,7 @@ class LLM:
             text: 要编码的文本
 
         Returns:
-            浮点数向量列表，失败时返回空列表
+            浮点数向量列表，失败时返回空列表（静默降级，不干扰主流程）
         """
         if not text or not text.strip():
             return []
@@ -149,7 +149,9 @@ class LLM:
             )
             return resp.data[0].embedding
         except Exception as e:
-            logger.warning(f"Embedding 生成失败: {e}")
+            # 静默降级：embedding 不可用时不影响主流程
+            # 常见原因：API Key 没有 embedding 权限、模型名不对、配额不足
+            logger.debug(f"Embedding 不可用 (已降级为关键词搜索): {e}")
             return []
 
     def think(self, messages: list, tools: list[dict] = None) -> LLMResponse:
