@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 数据库
+*.db
+*.db-shm
+*.db-wal
+
+# 系统
+.DS_Store

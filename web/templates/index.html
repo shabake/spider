@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spider — Web UI</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+
+        <!-- 侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>🕷️ Spider</h2>
+                <button class="sidebar-toggle" onclick="toggleSidebar()" title="收起侧边栏">◀</button>
+            </div>
+            <div class="conversation-list" id="conv-list">
+                <div style="color:var(--text-muted);font-size:13px;padding:16px;text-align:center;">
+                    加载中...
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主区域 -->
+        <main class="main-area">
+
+            <!-- 顶部栏 -->
+            <header class="top-bar">
+                <button class="sidebar-toggle" onclick="toggleSidebar()" style="background:none;border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;padding:4px 8px;border-radius:6px;font-size:14px;">☰</button>
+                <span class="spider-icon">🕷️</span>
+                <h1>Spider Agent</h1>
+                <div class="status">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">连接中...</span>
+                </div>
+            </header>
+
+            <!-- 聊天区 -->
+            <div class="chat-area" id="chat-area"></div>
+
+            <!-- 输入区 -->
+            <div class="input-area">
+                <div class="input-row">
+                    <textarea id="task-input"
+                              placeholder="输入任务，例如：查看当前目录有哪些文件..."
+                              rows="1"></textarea>
+                    <button id="send-btn">发送</button>
+                </div>
+                <div class="input-hint">Enter 发送 · Shift+Enter 换行</div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="/static/js/chat.js"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+    </script>
+</body>
+</html>

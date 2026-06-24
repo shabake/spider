@@ -1,0 +1,197 @@
+# Hermes 设计模式参考
+
+Spider 的设计灵感来自 [Hermes Agent](https://github.com/NousResearch/hermes-agent)。本文档记录了从 Hermes 中学到的关键设计模式，以及 Spider 中的对应实现。
+
+## 模式总览
+
+| 模式 | Hermes | Spider | Phase |
+|------|--------|--------|-------|
+| **ReAct 循环** | Agent CLI 主循环 | `Agent.run()` | 1 ✅ |
+| **Tool as Function** | Toolset 系统 | `ToolRegistry` | 1 ✅ |
+| **System Prompt** | 内置角色设定 | `Agent.SYSTEM_PROMPT` | 1 ✅ |
+| **流式输出** | `display.streaming` | `think_stream()` | 1 ✅ |
+| **子代理 (Delegation)** | `delegate_task` 工具 | `SubAgentPool` | 2 ✅ |
+| **技能系统 (Skill)** | `skills/` 目录 + 管理器 | `SkillManager` | 2 ✅ |
+| **平台适配** | `platforms/feishu` 等 | `PlatformAdapter` (规划中) | 3 📅 |
+| **记忆系统** | SQLite + Memory Store | `MemoryStore` (规划中) | 3 📅 |
+
+---
+
+## 1. ReAct 循环
+
+### Hermes 的实现
+Hermes 的 Agent 核心是一个 `while` 循环，每次迭代：
+1. 调用 LLM 获取 response
+2. 判断 finish_reason → `stop` 则结束, `tool_calls` 则执行工具
+3. 工具结果追加到消息列表，继续下一轮
+
+### Spider 的实现
+```python
+# core/agent.py
+for turn in range(self.max_turns):
+    response = await self.think()           # LLM 思考
+    if response["is_done"]:                 # 决定结束
+        return response["content"]
+    for tc in response["tool_calls"]:      # 执行工具
+        result = await self.tools.execute(tc)
+        self.messages.append(tool_call_msg)
+        self.messages.append(tool_result_msg)
+```
+
+### 关键设计决策
+- 最大轮数限制 (`max_turns=30`) — 防止无限循环
+- 流式输出默认开启 — 用户不需等待完整响应
+- 每次 tool call 都重新进入 LLM — 保持上下文连贯
+
+---
+
+## 2. Tool 注册系统
+
+### Hermes 的实现
+Hermes 的 toolset 以插件形式注册，每个 tool 有：
+- `name` — 唯一标识
+- `description` — 自然语言描述（LLM 理解用途）
+- `parameters` — JSON Schema（LLM 知道怎么调用）
+- handler — 实际执行的 Python 函数
+
+### Spider 的实现
+```python
+# core/tool_registry.py
+class Tool:
+    @property
+    def schema(self):
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            }
+        }
+
+class ToolRegistry:
+    def register(self, name, description, handler, parameters):
+        self._tools[name] = Tool(name, description, handler, parameters)
+
+    async def execute(self, tool_call):
+        tool = self.get(tool_call["name"])
+        return await tool.execute(tool_call["arguments"])
+```
+
+### 关键设计决策
+- 工具 schema 自动生成 — 减少重复代码
+- handler 是 async 函数 — 支持 IO 操作不阻塞
+- 执行结果统一返回字符串 — LLM 只理解文本
+
+---
+
+## 3. LLM 抽象层
+
+### Hermes 的实现
+Hermes 通过 `openai` SDK 调用 LLM，支持：
+- `chat.completions.create()` — 非流式
+- `stream=True` — 流式
+- `tools` 参数 — tool use
+
+### Spider 的实现
+```python
+# core/llm.py
+class LLM:
+    def think(self, messages, tools=None):       # 非流式
+        pass
+    def think_stream(self, messages, tools=None,  # 流式
+                     on_content=None, on_tool=None):
+        pass
+```
+
+### 关键设计决策
+- 兼容 OpenAI API — DeepSeek、通义千问等都可替换
+- API Key 优先从环境变量读取 — 避免硬编码
+- 流式回调模式 — `on_content` / `on_tool` 分离关注点
+
+---
+
+## 4. System Prompt (角色设定)
+
+Hermes 通过 system prompt 定义 Agent 的行为模式、可用能力和限制。
+
+Spider 的实现：
+```python
+class Agent:
+    SYSTEM_PROMPT = """你是一个名为 Spider 的 AI 助手。你有以下能力：
+1. 使用各种工具来完成任务
+2. 将复杂任务拆解为多个步骤
+3. 如需更多信息，主动询问用户
+
+始终用中文回复。思考过程保持简洁。"""
+```
+
+### 设计要点
+- 明确告知 LLM 有工具可用 — 鼓励使用工具
+- 任务拆解提示 — 引导 llm 分步骤思考
+- 简洁思考 + 中文回复 — 适应主要使用场景
+
+---
+
+## 5. 子代理 (Delegation)
+
+### Hermes 的实现
+```yaml
+# config.yaml
+delegation:
+  max_concurrent_children: 3
+  max_spawn_depth: 1
+```
+Agent 通过 `delegate_task` 工具创建子 Agent，子 Agent 独立运行并返回结果。
+
+### Spider 的实现
+```python
+# core/sub_agent.py
+class SubAgentPool:
+    def __init__(self, api_key, base_url, tools, max_concurrent=3):
+        self.max_concurrent = max_concurrent
+        self._running = {}
+
+    async def delegate(self, task: str, context: str = "") -> str:
+        child = Agent(api_key=self.api_key, base_url=self.base_url)
+        # 共享父 Agent 的工具
+        for name in self._tools.names:
+            tool = self._tools.get(name)
+            child.register_tool(name, tool.description, tool.handler, tool.parameters)
+        return await child.run(full_task, stream=False)
+```
+
+---
+
+## 6. 技能系统 (Skill)
+
+### Hermes 的实现
+技能存储在 `~/hermes-skills/skills/`，每个技能是一个结构化目录：
+```
+skills/deepseek-balance/
+├── skill.yaml    # 元数据 + prompt
+└── scripts/      # 可执行脚本
+```
+
+### Spider 的实现
+```python
+# core/skill_manager.py
+class SkillManager:
+    def __init__(self, skills_dir="skills/"):
+        self.skills_dir = skills_dir
+        self._skills = []
+        self.load_all()
+
+    def load_all(self):
+        """加载 skills/ 目录下所有技能"""
+        for fname in os.listdir(self.skills_dir):
+            if fname.endswith(".yaml"):
+                self._skills.append(Skill.from_dict(yaml.safe_load(open(fpath))))
+
+    def find_matching(self, task: str) -> list[Skill]:
+        """根据 trigger 关键词匹配"""
+        return [s for s in self._skills if s.matches(task)]
+
+    async def save(self, name, description, trigger, prompt, tools=""):
+        """保存新技能到 skills/ 目录"""
+```

@@ -1,0 +1,210 @@
+# 🗺️ Spider 路线图
+
+> 对照 Hermes 完整功能，排 Spider 后续开发优先级。
+
+## Phase 4 — 能力增强
+
+### ⭐⭐⭐ 人机交互中断 (Human-in-the-Loop)
+
+**目标**：Agent 在执行关键操作前可以暂停，等待用户确认或补充信息。
+
+```python
+# 期望用法
+await agent.ask("即将删除文件 /tmp/data，是否继续？")
+# → 等待用户输入 → 得到 yes/no → 继续或中止
+
+# 或者 Agent 主动追问
+await agent.ask("我没找到配置文件，你要手动指定路径吗？")
+```
+
+**实现思路**：
+- `Agent` 增加 `interrupt()` 方法，抛出中断信号
+- Web UI 通过 SSE 推送确认弹窗，用户选择后继续
+- CLI 模式直接在终端等待输入
+- 工具 schema 支持 `"confirm_required": True` 标记
+
+**依赖**：无，独立功能
+
+---
+
+### ⭐⭐⭐ 向量记忆 (RAG)
+
+**目标**：用语义搜索替代关键词匹配，让记忆真正"想起来"。
+
+**现状**：FTS5 全文搜索 → 只能精确匹配关键词，搜"存储空间"找不到"磁盘使用"
+
+**实现思路**：
+- 集成轻量向量库：Chroma 或 sqlite-vec
+- 用 `sentence-transformers` 或 OpenAI/DeepSeek embedding API 生成向量
+- `recall()` 改为语义检索，返回最相似的 top-k 记忆
+- FTS5 作为 fallback 保留
+
+**依赖**：需要 embedding 模型 / API
+
+---
+
+### ⭐⭐⭐ 平台适配器 (Platform Adapters)
+
+**目标**：一套统一的 `PlatformAdapter` 接口，对接不同平台。
+
+```python
+class PlatformAdapter:
+    async def send_message(self, content: str): ...
+    async def send_stream(self, chunks): ...
+    async def wait_for_input(self, prompt: str) -> str: ...
+    async def show_tool_call(self, name, args, result): ...
+```
+
+**内置适配器**：
+| 平台 | 说明 |
+|------|------|
+| Web (当前) | 已有的 FastAPI + SSE |
+| 飞书 | 飞书 Bot + 消息卡片 |
+| Discord | Discord Bot + Slash Command |
+| Telegram | Telegram Bot |
+| Terminal | 已有的 CLI 模式 |
+
+**实现思路**：
+- `platforms/base.py` — 抽象基类
+- `web/app.py` 重构接入 PlatformAdapter
+- 各平台只需实现 4-5 个方法
+
+---
+
+### ⭐⭐ 工具权限体系 (Tool Auth)
+
+**目标**：按风险等级管理工具执行权限。
+
+| 等级 | 行为 | 示例工具 |
+|------|------|----------|
+| 🟢 `safe` | 直接执行，无需确认 | `read_file`, `list_files` |
+| 🟡 `confirm` | 执行前弹窗确认 | `shell`, `write_file`, `delegate_task` |
+| 🔴 `dangerous` | 默认禁止，需手动放行 | `shell`(含 rm/sudo), 高风险操作 |
+| ⚪ `ask_llm` | 让 LLM 判断风险后决定 | 动态判定 |
+
+**实现思路**：
+- 工具注册时增加 `risk_level` 参数
+- Agent 执行前检查权限，高风险触发 `interrupt()`
+- 可在配置文件中自定义覆盖
+
+---
+
+### ⭐⭐ 多 LLM 切换 (Multi-LLM)
+
+**目标**：通过配置文件切换底层模型。
+
+```yaml
+# config.yaml
+llm:
+  provider: deepseek   # deepseek | openai | anthropic | ollama
+  model: deepseek-v4-flash
+  api_key: ${DEEPSEEK_API_KEY}
+  base_url: https://api.deepseek.com/v1
+```
+
+**实现思路**：
+- `LLM` 类抽象为接口
+- 各 provider 实现 `LLMProvider` 子类
+- 启动时根据配置动态加载
+
+---
+
+### ⭐⭐ Agent 状态序列化 (State Persistence)
+
+**目标**：Agent 运行到一半时保存完整状态，下次启动可继续。
+
+**场景**：
+- 执行到第 5 轮时程序重启 → 恢复后从第 5 轮继续
+- Agent 跑复杂任务中途需要暂停，下次继续
+
+**实现思路**：
+- 将 `messages`、`_turn`、工具注册状态序列化为 JSON
+- 存入 SQLite 或文件
+- `Agent.resume(state_path)` 静态方法反序列化恢复
+
+---
+
+### ⭐ 配置管理 (Config)
+
+**目标**：YAML 配置文件替代环境变量散养。
+
+```yaml
+# spider.yaml
+memory:
+  db_path: ./spider_memory.db
+  embedding: true
+
+skills:
+  dir: ./skills
+
+tools:
+  confirm: [shell, write_file]
+  dangerous: []
+```
+
+---
+
+### ⭐ 插件化工具加载
+
+**目标**：`tools/` 目录下的 `.py` 文件自动注册为工具。
+
+```python
+# tools/my_tool.py  → 自动注册为 my_tool
+SCHEMA = {...}
+async def handler(**kwargs): ...
+```
+
+**实现思路**：
+- 约定每个工具模块暴露 `SCHEMA` 和 `handler`
+- `ToolRegistry` 新增 `load_from_directory()` 方法
+- 扫描 tools/ 下所有 .py 动态 import
+
+---
+
+### ⭐ 单元测试
+
+**目标**：核心模块测试覆盖。
+
+| 模块 | 测试内容 |
+|------|----------|
+| `tool_registry` | 注册/查找/执行/异常 |
+| `agent` | ReAct 循环、中断、回调 |
+| `memory` | CRUD、FTS5 搜索 |
+| `sub_agent` | 委托执行、并发限制 |
+| `skill_manager` | 加载/匹配/保存 |
+
+---
+
+### ⭐ 任务队列/调度
+
+**目标**：支持异步任务排队、定时触发。
+
+**场景**：
+- 复杂任务放到后台执行，完成后通知
+- "每天早上 9 点检查磁盘空间"
+- 多个任务排队，避免并发冲突
+
+---
+
+### ⭐ 人机协作模式
+
+**目标**：从全自主到半自动可配置。
+
+```yaml
+# 三种模式
+autonomy:
+  mode: full      # full | semi | manual
+  # full:  全自主，不需要人参与
+  # semi:  关键步骤等确认，routine 直接执行
+  # manual: 每一步都等用户批准
+```
+
+---
+
+## 优先级说明
+
+```
+⭐⭐⭐ 核心缺失 — 影响日常使用体验
+⭐⭐  重要但不紧急 — 提升能力和安全性
+⭐   锦上添花 — 有很好没有也不影响
+```

@@ -1,0 +1,10 @@
+name: disk-check
+description: 检查磁盘使用情况，关注高使用率分区
+trigger: 磁盘|disk|空间|存储|容量
+prompt: |
+  使用 shell 工具执行 df -h 查看磁盘使用情况。
+  重点关注使用率超过 80% 的分区。
+  也执行 df -hi 查看 inode 使用情况。
+tools:
+- shell
+created: 2026-06-24
