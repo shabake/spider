@@ -42,9 +42,9 @@ logging.basicConfig(level=logging.WARNING)
 cli = SpiderCLI()
 
 
-def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None):
+def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False):
     """创建预配置的 Agent 实例"""
-    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None)
+    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None, strategy_mode=strategy_mode)
 
     memory = MemoryStore(db_path, llm=agent.llm) if db_path else MemoryStore(llm=agent.llm)
     agent.memory = memory
@@ -132,18 +132,18 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     return agent
 
 
-async def run_task(task: str, api_key=None, base_url=None, db_path=None):
+async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False):
     """执行单次任务"""
     try:
-        agent = create_agent(api_key, base_url, db_path)
+        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode)
         await agent.run(task, cli=cli)
     except AuthError as e:
         print(f"\n{e}")
 
 
-async def interactive_mode(api_key=None, base_url=None, db_path=None):
+async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False):
     """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
-    agent = create_agent(api_key, base_url, db_path)
+    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode)
 
     # 预加载 MCP，获取连接信息
     mcp_info = "无"
@@ -157,6 +157,9 @@ async def interactive_mode(api_key=None, base_url=None, db_path=None):
 
     # 显示欢迎信息
     cli.welcome(mcp_info=mcp_info)
+
+    if agent.strategy_mode:
+        cli.muted("🧠 战略推理模式 (StraTA)")
 
     while True:
         task = cli.input_prompt()
@@ -250,6 +253,8 @@ def main():
     parser.add_argument("--base-url", default="https://api.deepseek.com/v1", help="API base URL")
     parser.add_argument("--db-path", default=None,
                         help="SQLite 数据库路径 (默认 <项目根>/spider_memory.db)")
+    parser.add_argument("--strategy", action="store_true",
+                        help="启用 StraTA 战略推理模式")
 
     args = parser.parse_args()
 
@@ -268,16 +273,20 @@ def main():
         from web.app import app
         cli.blank()
         cli.muted(f"Web UI  →  http://{args.host}:{args.port}")
+        if args.strategy:
+            cli.muted("🧠 战略推理模式已启用")
         cli.blank()
+        # 传递 strategy_mode 给 web app
+        app.state.strategy_mode = args.strategy
         uvicorn.run(app, host=args.host, port=args.port)
         return
 
     task = " ".join(args.task) if args.task else ""
 
     if args.interactive or (not task):
-        asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path))
+        asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path, strategy_mode=args.strategy))
     else:
-        asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path))
+        asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path, strategy_mode=args.strategy))
 
 
 if __name__ == "__main__":

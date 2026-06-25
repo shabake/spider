@@ -76,8 +76,11 @@ def _create_agent():
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
+    # 读取 strategy_mode（从 app.state 或环境变量）
+    strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
+
     # 先创建 Agent（内部初始化 LLM），再用 LLM 初始化 MemoryStore
-    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None)
+    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None, strategy_mode=strategy_mode)
     _memory = MemoryStore(llm=agent.llm)
     agent.memory = _memory
     agent.memory_store = _memory
@@ -358,8 +361,10 @@ async def list_tools():
 async def status():
     """检查 API Key 和系统状态"""
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     return {
         "api_key_configured": bool(api_key),
         "api_key_prefix": api_key[:8] + "..." if api_key else "",
         "memory_db": get_memory().db_path if get_memory() else None,
+        "strategy_mode": strategy_mode,
     }

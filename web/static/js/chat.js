@@ -518,6 +518,22 @@ async function init() {
         if (!data.api_key_configured) {
             statusDot.className = 'status-dot error';
             statusText.textContent = '未设置 API Key';
+        } else if (data.strategy_mode) {
+            statusDot.className = 'status-dot';
+            statusText.textContent = '🧠 战略推理';
+        }
+        // 设置面板中显示推理模式状态
+        const strategyStatus = document.getElementById('strategy-status');
+        if (strategyStatus) {
+            if (data.strategy_mode) {
+                strategyStatus.textContent = '已启用';
+                strategyStatus.style.background = 'rgba(188,140,255,0.15)';
+                strategyStatus.style.color = 'var(--purple)';
+            } else {
+                strategyStatus.textContent = 'CLI 模式（--strategy）';
+                strategyStatus.style.background = 'var(--bg-tertiary)';
+                strategyStatus.style.color = 'var(--text-muted)';
+            }
         }
     } catch (e) {
         statusDot.className = 'status-dot disconnected';

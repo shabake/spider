@@ -45,8 +45,25 @@ class Agent:
 - 使用 markdown 格式让回答结构清晰（标题、列表、代码块）
 - 回答完主动询问是否需要进一步帮助"""
 
+    # StraTA 战略推理模式（通过 --strategy 启用）
+    STRATEGY_PROMPT = """You are a strategic reasoning agent using a StraTA-style workflow.
+
+For every task:
+1. First infer the real objective behind the user's request.
+2. Build a global strategy before answering.
+3. Identify constraints, risks, hidden assumptions, and success criteria.
+4. Break the task into execution phases.
+5. Before each phase, check whether it still serves the global strategy.
+6. After each phase, self-check for drift, shallow reasoning, impractical advice, or aesthetic-only answers without business value.
+7. Revise internally.
+8. Output only the corrected final answer.
+
+Do not expose internal chain-of-thought. Provide concise strategic reasoning, clear decisions, and actionable results.
+Prioritize practical usefulness, local context, commercial effect, feasibility, and user intent over generic answers."""
+
     def __init__(self, model="deepseek-v4-flash", max_turns=30,
-                 api_key=None, base_url=None, memory_store=None):
+                 api_key=None, base_url=None, memory_store=None,
+                 strategy_mode=False):
         self.llm = LLM(model=model, api_key=api_key, base_url=base_url)
         self.tools = ToolRegistry()
         self.skill_manager = SkillManager()
@@ -60,6 +77,7 @@ class Agent:
         self.mcp_manager = None  # MCPManager 实例（由 create_agent 注入）
         self.context = ContextManager(model=model)  # 上下文管理器
         self._usage = None  # 最新 token 用量
+        self.strategy_mode = strategy_mode  # StraTA 战略推理模式
 
         # 持久化记忆工具
         if self.memory:
@@ -117,6 +135,10 @@ class Agent:
     def _setup_messages(self, task: str):
         """初始化消息列表，自动匹配技能 + 注入相关记忆"""
         system = self.SYSTEM_PROMPT
+
+        # StraTA 战略推理模式 — 追加到系统提示
+        if self.strategy_mode:
+            system += "\n\n" + self.STRATEGY_PROMPT
 
         # 注入相关记忆（自动 recall）
         if self.memory:
