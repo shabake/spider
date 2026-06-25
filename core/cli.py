@@ -221,17 +221,22 @@ class SpiderCLI:
 
     def drain_stdin(self):
         """排出残留的 stdin 字符，避免影响下一次 input()"""
+        if not sys.stdin.isatty():
+            return
         import termios, tty
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
         try:
-            tty.setcbreak(fd)
-            while select.select([sys.stdin], [], [], 0)[0]:
-                sys.stdin.read(1)
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setcbreak(fd)
+                while select.select([sys.stdin], [], [], 0)[0]:
+                    sys.stdin.read(1)
+            except Exception:
+                pass
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
         except Exception:
             pass
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     # ── 等待动画 ─────────────────────────────
 
