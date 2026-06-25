@@ -24,6 +24,8 @@ tools:
   - read_file
   - write_file
   - list_files
+  - web_search
+  - web_fetch
 
 # 工具风险覆盖
 risk_overrides:

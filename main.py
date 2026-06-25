@@ -28,6 +28,7 @@ from core.cli import SpiderCLI
 from tools.shell import execute_shell, SHELL_TOOL_SCHEMA
 from tools.read_write import read_file, write_file, list_files, READ_FILE_SCHEMA, WRITE_FILE_SCHEMA, LIST_FILES_SCHEMA
 from tools.convert import docx_to_pdf, pdf_to_docx, DOCX_TO_PDF_SCHEMA, PDF_TO_DOCX_SCHEMA
+from tools.web import web_search, web_fetch, WEB_SEARCH_SCHEMA, WEB_FETCH_SCHEMA
 try:
     import yaml
     HAS_YAML = True
@@ -172,6 +173,13 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     _reg("self_find",
          "【自开发】在 Spider 自己的源码中语义搜索代码。",
          self_find, SELF_FIND_SCHEMA, "safe")
+    _reg("web_search",
+         "搜索网络，返回相关网页标题和摘要。需要联网查资料时使用。",
+         web_search, WEB_SEARCH_SCHEMA, "safe")
+    _reg("web_fetch",
+         "抓取指定 URL 的网页内容，提取可读文本。需要阅读具体网页时使用。",
+         web_fetch, WEB_FETCH_SCHEMA, "safe")
+
     _reg("self_map",
          "【自开发】查看 Spider 自己的项目结构。",
          self_map, SELF_MAP_SCHEMA, "safe")

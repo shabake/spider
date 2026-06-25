@@ -25,6 +25,7 @@ from core.mcp_client import MCPManager
 from tools.shell import execute_shell, SHELL_TOOL_SCHEMA
 from tools.read_write import read_file, write_file, list_files, READ_FILE_SCHEMA, WRITE_FILE_SCHEMA, LIST_FILES_SCHEMA
 from tools.convert import docx_to_pdf, pdf_to_docx, DOCX_TO_PDF_SCHEMA, PDF_TO_DOCX_SCHEMA
+from tools.web import web_search, web_fetch, WEB_SEARCH_SCHEMA, WEB_FETCH_SCHEMA
 from tools.self_dev import (
     self_find, SELF_FIND_SCHEMA,
     self_map, SELF_MAP_SCHEMA,
@@ -135,6 +136,14 @@ def _create_agent():
                         risk_level="safe")
     agent.register_tool("pdf_to_docx", "将 PDF 转换为 Word 文档 (.docx)", pdf_to_docx, PDF_TO_DOCX_SCHEMA,
                         risk_level="safe")
+
+    # ── 网络工具 ──────────────────────────────────────────
+    agent.register_tool("web_search",
+                        "搜索网络，返回相关网页标题和摘要。需要联网查资料时使用。",
+                        web_search, WEB_SEARCH_SCHEMA, risk_level="safe")
+    agent.register_tool("web_fetch",
+                        "抓取指定 URL 的网页内容，提取可读文本。需要阅读具体网页时使用。",
+                        web_fetch, WEB_FETCH_SCHEMA, risk_level="safe")
 
     # ── Self-Dev 工具 ──────────────────────────────────────
     agent.register_tool(
