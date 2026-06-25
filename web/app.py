@@ -79,12 +79,18 @@ def _create_agent():
     # 读取配置（从 app.state 或环境变量）
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
+    profile = getattr(app.state, "profile", None)
+    profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
         confirm_enabled = False
 
     # 先创建 Agent（内部初始化 LLM），再用 LLM 初始化 MemoryStore
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
                   strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+
+    # 应用 Profile 的 system prompt（提前设置，工具等所有工具注册完再处理）
+    if profile and profile.get("prompt"):
+        agent.set_system_prompt(profile["prompt"].strip())
     _memory = MemoryStore(llm=agent.llm)
     agent.memory = _memory
     agent.memory_store = _memory
@@ -174,6 +180,20 @@ def _create_agent():
     mcp_config = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_servers.json")
     if os.path.exists(mcp_config):
         agent.mcp_manager = MCPManager(config_path=mcp_config)
+
+    # 应用 Profile 的工具白名单和风险覆盖（在所有工具注册完后）
+    if profile:
+        prof_tools = profile.get("tools", None)
+        prof_overrides = profile.get("risk_overrides", {}) or {}
+        if prof_tools is not None:
+            for name in list(agent.tools.names):
+                if name not in prof_tools:
+                    agent.tools._tools.pop(name, None)
+        for tool_name, risk in prof_overrides.items():
+            try:
+                agent.tools.set_risk_override(tool_name, risk)
+            except Exception:
+                pass
 
     return agent
 
@@ -381,6 +401,7 @@ async def status():
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
+    profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
         confirm_enabled = False
     return {
@@ -389,4 +410,5 @@ async def status():
         "memory_db": get_memory().db_path if get_memory() else None,
         "strategy_mode": strategy_mode,
         "confirm_enabled": confirm_enabled,
+        "profile": profile_name,
     }

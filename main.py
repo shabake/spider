@@ -28,6 +28,12 @@ from core.cli import SpiderCLI
 from tools.shell import execute_shell, SHELL_TOOL_SCHEMA
 from tools.read_write import read_file, write_file, list_files, READ_FILE_SCHEMA, WRITE_FILE_SCHEMA, LIST_FILES_SCHEMA
 from tools.convert import docx_to_pdf, pdf_to_docx, DOCX_TO_PDF_SCHEMA, PDF_TO_DOCX_SCHEMA
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 from tools.self_dev import (
     self_find, SELF_FIND_SCHEMA,
     self_map, SELF_MAP_SCHEMA,
@@ -42,10 +48,89 @@ logging.basicConfig(level=logging.WARNING)
 cli = SpiderCLI()
 
 
-def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True):
-    """创建预配置的 Agent 实例"""
+# ── Profile 系统 ────────────────────────────────────────────
+
+def load_profile(name: str) -> dict | None:
+    """加载 profiles/ 下的角色配置文件
+
+    Args:
+        name: 角色名（对应 profiles/{name}.yaml）
+
+    Returns:
+        解析后的 dict，或 None（文件不存在时）
+    """
+    import os
+    fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles", f"{name}.yaml")
+    if not os.path.exists(fpath):
+        print(f"⚠️  Profile '{name}' 不存在 (profiles/{name}.yaml)")
+        return None
+
+    if HAS_YAML:
+        with open(fpath, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    # fallback: 简易解析
+    return _load_yaml_simple(fpath)
+
+
+def _load_yaml_simple(fpath: str) -> dict:
+    """简易 YAML 解析（不依赖 pyyaml）"""
+    data = {}
+    current_key = None
+    current_lines = []
+    with open(fpath, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.rstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not stripped[0].isspace():
+                if current_key:
+                    data[current_key] = "\n".join(current_lines).strip() if current_lines else ""
+                    current_lines = []
+                if ":" in stripped:
+                    key, _, val = stripped.partition(":")
+                    current_key = key.strip()
+                    val = val.strip()
+                    if val:
+                        # 列表值: [a, b, c]
+                        if val.startswith("[") and val.endswith("]"):
+                            data[current_key] = [v.strip().strip('"').strip("'") for v in val[1:-1].split(",") if v.strip()]
+                        else:
+                            data[current_key] = val
+                        current_key = None
+            elif current_key and stripped:
+                current_lines.append(stripped)
+        if current_key:
+            data[current_key] = "\n".join(current_lines).strip() if current_lines else ""
+    return data
+
+
+def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True, profile: dict = None):
+    """创建预配置的 Agent 实例
+
+    Args:
+        profile: 可选的 Profile 配置 dict（来自 profiles/*.yaml）
+                 会覆盖 db_path、system prompt、工具白名单等
+    """
+    # ── 应用 Profile 配置 ─────────────────────────────────
+    prof_tools = None      # 工具白名单（None = 注册全部）
+    prof_overrides = {}    # 风险覆盖
+
+    if profile:
+        # 覆盖记忆数据库路径
+        if profile.get("db_path"):
+            db_path = profile["db_path"]
+        # 工具白名单
+        prof_tools = profile.get("tools", None)
+        # 风险覆盖
+        prof_overrides = profile.get("risk_overrides", {}) or {}
+
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
                   strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+
+    # 应用 Profile 的 system prompt
+    if profile and profile.get("prompt"):
+        agent.set_system_prompt(profile["prompt"].strip())
 
     memory = MemoryStore(db_path, llm=agent.llm) if db_path else MemoryStore(llm=agent.llm)
     agent.memory = memory
@@ -54,91 +139,61 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     if agent.memory:
         agent._register_memory_tools()
 
+    # ── 工具注册辅助 ─────────────────────────────────────
+    def _reg(name, desc, handler, schema, risk="safe"):
+        """仅在白名单（若有）中包含该工具时注册"""
+        if prof_tools is not None and name not in prof_tools:
+            return
+        agent.register_tool(name, desc, handler, schema, risk_level=risk)
+
+    # ── 注册工具（受 Profile 白名单控制） ────────────────
     sub_pool = SubAgentPool(
         api_key=api_key, base_url=base_url,
         tools=agent.tools, parent_agent=agent
     )
-    agent.register_tool(
-        "delegate_task",
-        "将子任务交给独立的子 Agent 执行，可并行处理多个独立任务。",
-        sub_pool.delegate, DELEGATE_TASK_SCHEMA,
-        risk_level="safe",
-    )
+    _reg("delegate_task",
+         "将子任务交给独立的子 Agent 执行，可并行处理多个独立任务。",
+         sub_pool.delegate, DELEGATE_TASK_SCHEMA, "safe")
 
-    agent.register_tool(
-        "save_skill",
-        "将当前经验保存为可复用的技能。",
-        agent.skill_manager.save, SAVE_SKILL_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "list_skills",
-        "列出所有已保存的技能",
-        agent.skill_manager.list, LIST_SKILLS_SCHEMA,
-        risk_level="safe",
-    )
+    _reg("save_skill",
+         "将当前经验保存为可复用的技能。",
+         agent.skill_manager.save, SAVE_SKILL_SCHEMA, "safe")
+    _reg("list_skills",
+         "列出所有已保存的技能",
+         agent.skill_manager.list, LIST_SKILLS_SCHEMA, "safe")
 
-    agent.register_tool(
-        "shell", "执行 shell 命令（macOS/Linux）", execute_shell, SHELL_TOOL_SCHEMA,
-        risk_level="confirm",
-    )
-    agent.register_tool(
-        "read_file", "读取文件内容", read_file, READ_FILE_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "write_file", "写入文件（会覆盖）", write_file, WRITE_FILE_SCHEMA,
-        risk_level="confirm",
-    )
-    agent.register_tool(
-        "list_files", "列出目录内容", list_files, LIST_FILES_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "docx_to_pdf", "将 Word 文档 (.docx) 转换为 PDF", docx_to_pdf, DOCX_TO_PDF_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "pdf_to_docx", "将 PDF 转换为 Word 文档 (.docx)", pdf_to_docx, PDF_TO_DOCX_SCHEMA,
-        risk_level="safe",
-    )
+    _reg("shell", "执行 shell 命令（macOS/Linux）", execute_shell, SHELL_TOOL_SCHEMA, "confirm")
+    _reg("read_file", "读取文件内容", read_file, READ_FILE_SCHEMA, "safe")
+    _reg("write_file", "写入文件（会覆盖）", write_file, WRITE_FILE_SCHEMA, "confirm")
+    _reg("list_files", "列出目录内容", list_files, LIST_FILES_SCHEMA, "safe")
+    _reg("docx_to_pdf", "将 Word 文档 (.docx) 转换为 PDF", docx_to_pdf, DOCX_TO_PDF_SCHEMA, "safe")
+    _reg("pdf_to_docx", "将 PDF 转换为 Word 文档 (.docx)", pdf_to_docx, PDF_TO_DOCX_SCHEMA, "safe")
 
-    agent.register_tool(
-        "self_find",
-        "【自开发】在 Spider 自己的源码中语义搜索代码。",
-        self_find, SELF_FIND_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "self_map",
-        "【自开发】查看 Spider 自己的项目结构。",
-        self_map, SELF_MAP_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "self_validate",
-        "【自开发】验证 Python 文件的语法正确性。",
-        self_validate, SELF_VALIDATE_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "self_review",
-        "【自开发】审查当前的 git 代码变更。",
-        self_review, SELF_REVIEW_SCHEMA,
-        risk_level="safe",
-    )
-    agent.register_tool(
-        "self_edit",
-        "【自开发】安全地修改代码文件。",
-        self_edit, SELF_EDIT_SCHEMA,
-        risk_level="confirm",
-    )
-    agent.register_tool(
-        "self_commit",
-        "【自开发】自动提交代码变更到 git。",
-        self_commit, SELF_COMMIT_SCHEMA,
-        risk_level="confirm",
-    )
+    _reg("self_find",
+         "【自开发】在 Spider 自己的源码中语义搜索代码。",
+         self_find, SELF_FIND_SCHEMA, "safe")
+    _reg("self_map",
+         "【自开发】查看 Spider 自己的项目结构。",
+         self_map, SELF_MAP_SCHEMA, "safe")
+    _reg("self_validate",
+         "【自开发】验证 Python 文件的语法正确性。",
+         self_validate, SELF_VALIDATE_SCHEMA, "safe")
+    _reg("self_review",
+         "【自开发】审查当前的 git 代码变更。",
+         self_review, SELF_REVIEW_SCHEMA, "safe")
+    _reg("self_edit",
+         "【自开发】安全地修改代码文件。",
+         self_edit, SELF_EDIT_SCHEMA, "confirm")
+    _reg("self_commit",
+         "【自开发】自动提交代码变更到 git。",
+         self_commit, SELF_COMMIT_SCHEMA, "confirm")
+
+    # 应用 Profile 的风险覆盖
+    for tool_name, risk in prof_overrides.items():
+        try:
+            agent.tools.set_risk_override(tool_name, risk)
+        except Exception:
+            pass
 
     # MCP 服务器（从 mcp_servers.json 加载）
     mcp_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_servers.json")
@@ -148,18 +203,18 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     return agent
 
 
-async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True):
+async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None):
     """执行单次任务"""
     try:
-        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile)
         await agent.run(task, cli=cli)
     except AuthError as e:
         print(f"\n{e}")
 
 
-async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True):
+async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None):
     """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
-    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile)
 
     # 预加载 MCP，获取连接信息
     mcp_info = "无"
@@ -273,15 +328,37 @@ def main():
                         help="启用 StraTA 战略推理模式")
     parser.add_argument("-y", "--no-confirm", action="store_true",
                         help="跳过所有操作确认（谨慎使用）")
+    parser.add_argument("--profile", default=None,
+                        help="角色配置名 (profiles/{name}.yaml)，如 finance、coding")
 
     args = parser.parse_args()
 
     confirm_enabled = not args.no_confirm
 
+    # 加载 Profile（如果有）
+    profile = None
+    profile_name = None
+    if args.profile:
+        profile_name = args.profile
+        profile = load_profile(args.profile)
+        if profile is None:
+            sys.exit(1)
+
     if args.api_key:
         os.environ["DEEPSEEK_API_KEY"] = args.api_key
     if args.base_url:
         os.environ["DEEPSEEK_BASE_URL"] = args.base_url
+
+    # 显示启动信息
+    cli.blank()
+    if profile_name:
+        display_name = profile.get("display", profile_name) if profile else profile_name
+        cli.muted(f"👤 Profile: {display_name}")
+    if args.strategy:
+        cli.muted("🧠 战略推理模式已启用")
+    if args.no_confirm:
+        cli.muted("⚡ 确认模式已关闭（所有操作自动放行）")
+    cli.blank()
 
     if args.web:
         try:
@@ -291,16 +368,13 @@ def main():
             sys.exit(1)
 
         from web.app import app
-        cli.blank()
         cli.muted(f"Web UI  →  http://{args.host}:{args.port}")
-        if args.strategy:
-            cli.muted("🧠 战略推理模式已启用")
-        if args.no_confirm:
-            cli.muted("⚡ 确认模式已关闭（所有操作自动放行）")
         cli.blank()
         # 传递配置给 web app
         app.state.strategy_mode = args.strategy
         app.state.confirm_enabled = confirm_enabled
+        app.state.profile = profile
+        app.state.profile_name = profile_name
         uvicorn.run(app, host=args.host, port=args.port)
         return
 
@@ -308,10 +382,12 @@ def main():
 
     if args.interactive or (not task):
         asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path,
-                                      strategy_mode=args.strategy, confirm_enabled=confirm_enabled))
+                                      strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
+                                      profile=profile, profile_name=profile_name))
     else:
         asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path,
-                              strategy_mode=args.strategy, confirm_enabled=confirm_enabled))
+                              strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
+                              profile=profile, profile_name=profile_name))
 
 
 if __name__ == "__main__":
