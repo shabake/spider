@@ -1,0 +1,29 @@
+name: daily-check
+description: 日常系统巡检：磁盘 + 内存 + 负载 + 进程
+trigger: 巡检|检查系统|日常检查|health check|系统状态
+prompt: |
+  请用中文汇总系统状态报告。关注：
+  - 磁盘使用率超过 80% 的分区
+  - 内存剩余量
+  - 系统运行时间
+  - 异常高负载的进程
+steps:
+  - name: 磁盘使用
+    tool: shell
+    params:
+      command: df -h
+  - name: 内存使用
+    tool: shell
+    params:
+      command: free -h
+  - name: 系统负载
+    tool: shell
+    params:
+      command: uptime
+  - name: 运行进程
+    tool: shell
+    params:
+      command: ps aux --sort=-%mem | head -8
+tools:
+  - shell
+created: 2026-06-25

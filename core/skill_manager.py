@@ -24,7 +24,8 @@ class Skill:
 
     def __init__(self, name: str, description: str, trigger: str,
                  prompt: str, tools: list[str] = None,
-                 created: str = None, file_path: str = None):
+                 created: str = None, file_path: str = None,
+                 steps: list[dict] = None):
         self.name = name
         self.description = description
         self.trigger = trigger          # 关键词匹配模式，如 "磁盘|disk|空间"
@@ -32,6 +33,12 @@ class Skill:
         self.tools = tools or []
         self.created = created or datetime.now().strftime("%Y-%m-%d")
         self.file_path = file_path
+        self.steps = steps or []        # 固定执行步骤 [{name, tool, params}]
+
+    @property
+    def has_steps(self) -> bool:
+        """是否有预定义执行步骤"""
+        return bool(self.steps)
 
     def matches(self, task: str) -> bool:
         """检查任务是否匹配此技能的 trigger"""
@@ -46,7 +53,7 @@ class Skill:
         return False
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "name": self.name,
             "description": self.description,
             "trigger": self.trigger,
@@ -54,6 +61,9 @@ class Skill:
             "tools": self.tools,
             "created": self.created,
         }
+        if self.steps:
+            d["steps"] = self.steps
+        return d
 
     @classmethod
     def from_dict(cls, data: dict, file_path: str = None):
@@ -65,6 +75,7 @@ class Skill:
             tools=data.get("tools", []),
             created=data.get("created"),
             file_path=file_path,
+            steps=data.get("steps", []),
         )
 
 
@@ -189,7 +200,7 @@ class SkillManager:
     # ── 保存 ────────────────────────────────────────────────
 
     async def save(self, name: str, description: str, trigger: str,
-                   prompt: str, tools: str = "") -> str:
+                   prompt: str, tools: str = "", steps: str = "") -> str:
         """
         保存新技能
 
@@ -197,8 +208,10 @@ class SkillManager:
             name: 技能名称（用作文件名）
             description: 简短描述
             trigger: 触发关键词，用 | 分隔
-            prompt: 技能提示词
+            prompt: 技能提示词（用于汇总指引）
             tools: 需要的工具，逗号分隔
+            steps: JSON 格式的执行步骤列表，如 [{"name":"查磁盘","tool":"shell","params":{"command":"df -h"}}]
+                    可选；定义了 steps 的技能会按顺序自动执行
 
         Returns:
             保存结果
@@ -219,6 +232,17 @@ class SkillManager:
 
         tool_list = [t.strip() for t in tools.split(",") if t.strip()] if tools else []
 
+        # 解析 steps（JSON 字符串 → 列表）
+        step_list = []
+        if steps and steps.strip():
+            try:
+                import json
+                parsed = json.loads(steps.strip())
+                if isinstance(parsed, list):
+                    step_list = parsed
+            except json.JSONDecodeError as e:
+                return f"❌ steps 格式错误，需要合法的 JSON 数组: {e}"
+
         skill_data = {
             "name": name,
             "description": description.strip(),
@@ -227,6 +251,8 @@ class SkillManager:
             "tools": tool_list,
             "created": datetime.now().strftime("%Y-%m-%d"),
         }
+        if step_list:
+            skill_data["steps"] = step_list
 
         try:
             if yaml:
@@ -237,7 +263,9 @@ class SkillManager:
                 self._save_yaml_simple(fpath, skill_data)
             # 重新加载
             self.load_all()
-            return f"✅ 技能 '{name}' 已保存 ({fpath})"
+            step_count = len(step_list)
+            steps_info = f"，{step_count} 个执行步骤" if step_list else ""
+            return f"✅ 技能 '{name}' 已保存{steps_info} ({fpath})"
         except Exception as e:
             return f"❌ 保存技能失败: {e}"
 
@@ -270,6 +298,9 @@ class SkillManager:
             lines.append(f"     📎 触发: {skill.trigger}")
             if skill.tools:
                 lines.append(f"     🛠️  工具: {', '.join(skill.tools)}")
+            if skill.steps:
+                step_names = [s.get("name", "?") for s in skill.steps]
+                lines.append(f"     📋 步骤: {' → '.join(step_names)}")
             lines.append("")
         return "\n".join(lines)
 
@@ -297,11 +328,17 @@ SAVE_SKILL_SCHEMA = {
         },
         "prompt": {
             "type": "string",
-            "description": "技能的完整提示词，告诉 AI 应该怎么做",
+            "description": "技能的完整提示词，告诉 AI 应该怎么做。如果定义了 steps，则 prompt 用于汇总指引",
         },
         "tools": {
             "type": "string",
             "description": "需要的工具，逗号分隔，如 'shell, read_file'",
+        },
+        "steps": {
+            "type": "string",
+            "description": "可选。JSON 格式的执行步骤列表。定义了 steps 的技能会按顺序自动执行。"
+            "格式: [{\"name\":\"步骤名\",\"tool\":\"工具名\",\"params\":{\"参数名\":\"值\"}}]。"
+            "如 [{\"name\":\"查磁盘\",\"tool\":\"shell\",\"params\":{\"command\":\"df -h\"}}]",
         },
     },
     "required": ["name", "description", "trigger", "prompt"],

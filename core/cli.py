@@ -202,6 +202,28 @@ class SpiderCLI:
         else:
             print(f"  └─ {preview}")
 
+    # ── 技能步骤 ────────────────────────────────
+
+    def display_step(self, step_name: str, tool_name: str, params: dict):
+        """显示技能步骤开始执行"""
+        args_str = ", ".join(f"{k}={v}" for k, v in params.items())
+        if self.console and HAS_RICH:
+            t = Text()
+            t.append("  ", style=C.MUTED)
+            t.append("📋 ", style=C.ACCENT)
+            t.append(step_name, style=C.TOOL_NAME)
+            t.append(f" → {tool_name}({args_str})", style=C.TOOL_ARGS)
+            self.console.print(t)
+        else:
+            print(f"  📋 {step_name} → {tool_name}({args_str})")
+
+    def display_info(self, msg: str):
+        """显示信息消息"""
+        if self.console and HAS_RICH:
+            self.console.print(f"  {msg}", style=C.ACCENT)
+        else:
+            print(f"  {msg}")
+
     # ── 状态消息 ─────────────────────────────────
 
     def success(self, msg: str):

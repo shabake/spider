@@ -55,6 +55,7 @@ class Agent:
         self._turn = 0
         self._start_time = None
         self._conv_id = None  # 当前会话 ID
+        self._step_skills = []  # 匹配到的带步骤的技能
 
         # 持久化记忆工具
         if self.memory:
@@ -107,15 +108,73 @@ class Agent:
             if memories:
                 system += f"\n\n📖 相关记忆:\n{memories}"
 
-        # 技能匹配
-        skill_prompts = self.skill_manager.get_skill_prompts(task)
-        if skill_prompts:
-            system += f"\n\n📚 参考技能提示:\n{skill_prompts}"
+        # 技能匹配 — 分离出有步骤的技能
+        self._step_skills = []
+        matched = self.skill_manager.find_matching(task)
+        prompt_parts = []
+        for skill in matched:
+            if skill.has_steps:
+                self._step_skills.append(skill)
+                prompt_parts.append(
+                    f"📌 参考技能 [{skill.name}]: {skill.description}\n"
+                    f"{skill.prompt}"
+                )
+            elif skill.prompt:
+                prompt_parts.append(
+                    f"📌 参考技能 [{skill.name}]: {skill.description}\n"
+                    f"{skill.prompt}"
+                )
+
+        if prompt_parts:
+            system += "\n\n" + "\n\n".join(prompt_parts)
 
         self.messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": task},
         ]
+
+    async def _execute_skill_steps(self, skill, cli=None) -> str:
+        """按顺序执行技能的预定义步骤
+
+        Args:
+            skill: Skill 实例（需有 steps 属性）
+            cli: 可选的 SpiderCLI 实例
+
+        Returns:
+            所有步骤的结果文本
+        """
+        results = []
+        for i, step in enumerate(skill.steps):
+            step_name = step.get("name", f"步骤{i+1}")
+            tool_name = step.get("tool", "")
+            params = step.get("params", {})
+
+            if cli:
+                cli.display_step(step_name, tool_name, params)
+
+            # 查找工具
+            tool = self.tools.get(tool_name)
+            if not tool:
+                msg = f"❌ [{step_name}] 工具 '{tool_name}' 不存在"
+                results.append(msg)
+                if cli:
+                    cli.display_tool_result(msg)
+                continue
+
+            # 执行工具
+            try:
+                result = await tool.execute(params)
+                output = f"📌 [{step_name}]\n{result}"
+                results.append(output)
+                if cli:
+                    cli.display_tool_result(result)
+            except Exception as e:
+                msg = f"❌ [{step_name}] 执行失败: {e}"
+                results.append(msg)
+                if cli:
+                    cli.display_tool_result(msg)
+
+        return "\n\n".join(results)
 
     async def run(self, task: str, stream=True, on_event=None, cli=None) -> str:
         """
@@ -139,6 +198,18 @@ class Agent:
         if self.memory:
             self._conv_id = self.memory.create_conversation(summary=task[:200])
             self.memory.save_message(self._conv_id, "user", task)
+
+        # 执行技能预制步骤（如果有）
+        if self._step_skills:
+            if cli:
+                cli.display_info("🔄 执行技能步骤...")
+            for skill in self._step_skills:
+                step_results = await self._execute_skill_steps(skill, cli=cli)
+                # 将步骤结果注入到会话上下文
+                self.messages.insert(-1, {
+                    "role": "system",
+                    "content": f"以下是根据技能「{skill.name}」自动执行的结果：\n\n{step_results}"
+                })
 
         if on_event and on_event.get("turn_start"):
             await on_event["turn_start"](0, self.max_turns)
