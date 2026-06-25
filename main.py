@@ -60,68 +60,83 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     agent.register_tool(
         "delegate_task",
         "将子任务交给独立的子 Agent 执行，可并行处理多个独立任务。",
-        sub_pool.delegate, DELEGATE_TASK_SCHEMA
+        sub_pool.delegate, DELEGATE_TASK_SCHEMA,
+        risk_level="safe",
     )
 
     agent.register_tool(
         "save_skill",
         "将当前经验保存为可复用的技能。",
-        agent.skill_manager.save, SAVE_SKILL_SCHEMA
+        agent.skill_manager.save, SAVE_SKILL_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
         "list_skills",
         "列出所有已保存的技能",
-        agent.skill_manager.list, LIST_SKILLS_SCHEMA
+        agent.skill_manager.list, LIST_SKILLS_SCHEMA,
+        risk_level="safe",
     )
 
     agent.register_tool(
-        "shell", "执行 shell 命令（macOS/Linux）", execute_shell, SHELL_TOOL_SCHEMA
+        "shell", "执行 shell 命令（macOS/Linux）", execute_shell, SHELL_TOOL_SCHEMA,
+        risk_level="confirm",
     )
     agent.register_tool(
-        "read_file", "读取文件内容", read_file, READ_FILE_SCHEMA
+        "read_file", "读取文件内容", read_file, READ_FILE_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
-        "write_file", "写入文件（会覆盖）", write_file, WRITE_FILE_SCHEMA
+        "write_file", "写入文件（会覆盖）", write_file, WRITE_FILE_SCHEMA,
+        risk_level="confirm",
     )
     agent.register_tool(
-        "list_files", "列出目录内容", list_files, LIST_FILES_SCHEMA
+        "list_files", "列出目录内容", list_files, LIST_FILES_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
-        "docx_to_pdf", "将 Word 文档 (.docx) 转换为 PDF", docx_to_pdf, DOCX_TO_PDF_SCHEMA
+        "docx_to_pdf", "将 Word 文档 (.docx) 转换为 PDF", docx_to_pdf, DOCX_TO_PDF_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
-        "pdf_to_docx", "将 PDF 转换为 Word 文档 (.docx)", pdf_to_docx, PDF_TO_DOCX_SCHEMA
+        "pdf_to_docx", "将 PDF 转换为 Word 文档 (.docx)", pdf_to_docx, PDF_TO_DOCX_SCHEMA,
+        risk_level="safe",
     )
 
     agent.register_tool(
         "self_find",
         "【自开发】在 Spider 自己的源码中语义搜索代码。",
-        self_find, SELF_FIND_SCHEMA
+        self_find, SELF_FIND_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
         "self_map",
         "【自开发】查看 Spider 自己的项目结构。",
-        self_map, SELF_MAP_SCHEMA
+        self_map, SELF_MAP_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
         "self_validate",
         "【自开发】验证 Python 文件的语法正确性。",
-        self_validate, SELF_VALIDATE_SCHEMA
+        self_validate, SELF_VALIDATE_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
         "self_review",
         "【自开发】审查当前的 git 代码变更。",
-        self_review, SELF_REVIEW_SCHEMA
+        self_review, SELF_REVIEW_SCHEMA,
+        risk_level="safe",
     )
     agent.register_tool(
         "self_edit",
         "【自开发】安全地修改代码文件。",
-        self_edit, SELF_EDIT_SCHEMA
+        self_edit, SELF_EDIT_SCHEMA,
+        risk_level="confirm",
     )
     agent.register_tool(
         "self_commit",
         "【自开发】自动提交代码变更到 git。",
-        self_commit, SELF_COMMIT_SCHEMA
+        self_commit, SELF_COMMIT_SCHEMA,
+        risk_level="confirm",
     )
 
     # MCP 服务器（从 mcp_servers.json 加载）

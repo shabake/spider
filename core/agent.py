@@ -83,9 +83,18 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         if self.memory:
             self._register_memory_tools()
 
-    def register_tool(self, name: str, description: str, handler, parameters: dict):
-        """注册一个工具"""
-        self.tools.register(name, description, handler, parameters)
+    def register_tool(self, name: str, description: str, handler, parameters: dict,
+                      risk_level: str = "safe"):
+        """注册一个工具
+
+        Args:
+            name: 工具名
+            description: 描述
+            handler: 异步处理函数
+            parameters: JSON Schema
+            risk_level: 风险等级 safe（默认直接执行）| confirm（需确认）| dangerous（禁止）
+        """
+        self.tools.register(name, description, handler, parameters, risk_level=risk_level)
 
     def set_system_prompt(self, prompt: str):
         """自定义 system prompt"""
@@ -100,6 +109,7 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
             "或者需要了解用户偏好、项目历史时使用。",
             self.memory.recall,
             RECALL_SCHEMA,
+            risk_level="safe",
         )
         self.register_tool(
             "save_memory",
@@ -108,17 +118,66 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
             "保存后未来任何对话都可以回忆起来。",
             self._save_memory_wrapper,
             SAVE_MEMORY_SCHEMA,
+            risk_level="safe",
         )
         self.register_tool(
             "conversations",
             "查看最近的对话历史记录。",
             self.memory.list_conversations,
             LIST_CONVERSATIONS_SCHEMA,
+            risk_level="safe",
         )
 
     async def _save_memory_wrapper(self, content: str, category: str = "general"):
         """包装 save_memory，自动记录来源会话 ID"""
         return await self.memory.save_memory(content, category, source_conv_id=self._conv_id)
+
+    async def _confirm_tool(self, tool_call: dict, cli=None, on_event=None) -> bool:
+        """检查工具是否需要确认，如需则等待用户响应
+
+        Args:
+            tool_call: {id, name, arguments}
+            cli: 可选的 SpiderCLI 实例
+            on_event: 可选的事件回调
+
+        Returns:
+            True = 允许执行，False = 用户拒绝
+        """
+        name = tool_call["name"]
+        risk = self.tools.get_risk_level(name)
+        if risk == "safe":
+            return True
+
+        # 构建确认信息
+        args_str = ", ".join(f"{k}={v}" for k, v in tool_call.get("arguments", {}).items())
+        message = f"🧑‍⚖️ 需要确认\n  🛠️  {name}({args_str})\n  风险等级: {risk}\n  确认执行？"
+
+        # Web 模式：走 SSE 确认回调
+        if on_event and on_event.get("confirm"):
+            if risk == "dangerous":
+                message = f"⚠️ 高风险操作\n  🛠️  {name}({args_str})\n  风险等级: {risk}\n  仅在你完全信任此操作时确认"
+            return await on_event["confirm"](message)
+
+        # CLI 模式：终端等待输入
+        if cli:
+            cli.muted(f"⚠️  需要确认 ({risk})")
+            cli.muted(f"  🛠️  {name}({args_str})")
+            if risk == "dangerous":
+                cli.error("  ⚠️  高风险操作，请谨慎确认")
+
+            # 暂停 Escape 监听，避免干扰 input()
+            cli.stop_abort()
+            try:
+                # 清空 stdin 残留
+                cli.drain_stdin()
+                answer = input("  ▸ 继续执行？(y/N): ")
+            finally:
+                cli.watch_abort()
+
+            return answer.strip().lower() in ("y", "yes", "是")
+
+        # fallback：没有 CLI 也没有 Web，直接放行
+        return True
 
     async def _load_mcp(self):
         """首次运行时加载 MCP 工具"""
@@ -201,6 +260,15 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
 
             # 执行工具
             try:
+                # 风险确认
+                fake_tc = {"name": tool_name, "arguments": params}
+                if not await self._confirm_tool(fake_tc, cli=cli):
+                    msg = f"⏭️ [{step_name}] 已跳过（用户拒绝）"
+                    results.append(msg)
+                    if cli:
+                        cli.display_tool_result(msg)
+                    continue
+
                 result = await tool.execute(params)
                 output = f"📌 [{step_name}]\n{result}"
                 results.append(output)
@@ -296,6 +364,32 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
                     cli.display_tool_call(tc["name"], tc["arguments"])
                 if on_event and on_event.get("tool_call"):
                     await on_event["tool_call"](tc["name"], tc["arguments"])
+
+                # 风险确认检查（Human-in-the-Loop）
+                if not await self._confirm_tool(tc, cli=cli, on_event=on_event):
+                    result = "❌ 已取消：用户拒绝了此操作"
+                    if cli:
+                        cli.display_tool_result(result)
+                    if on_event and on_event.get("tool_result"):
+                        await on_event["tool_result"](tc["name"], result)
+
+                    # 将拒绝结果加入对话
+                    args_str = json.dumps(tc["arguments"], ensure_ascii=False)
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": args_str},
+                        }]
+                    })
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result,
+                    })
+                    continue
 
                 result = await self.tools.execute(tc)
 
