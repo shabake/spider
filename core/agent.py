@@ -16,6 +16,7 @@ from datetime import datetime
 from .llm import LLM
 from .tool_registry import ToolRegistry
 from .skill_manager import SkillManager
+from .context import ContextManager
 from .memory import (
     MemoryStore,
     RECALL_SCHEMA,
@@ -57,6 +58,8 @@ class Agent:
         self._conv_id = None  # 当前会话 ID
         self._step_skills = []  # 匹配到的带步骤的技能
         self.mcp_manager = None  # MCPManager 实例（由 create_agent 注入）
+        self.context = ContextManager(model=model)  # 上下文管理器
+        self._usage = None  # 最新 token 用量
 
         # 持久化记忆工具
         if self.memory:
@@ -308,6 +311,15 @@ class Agent:
                         {"tool_calls": [{"name": tc["name"], "args": tc["arguments"]}]},
                     )
                     self.memory.save_message(self._conv_id, "tool", result)
+
+            # 保存 token 用量
+            self._usage = response.get("usage")
+
+            # 检查是否需要压缩上下文
+            if self.context.should_compress(self.messages):
+                if cli:
+                    cli.info(f"📐 自动压缩上下文（节省空间）...")
+                self.messages = await self.context.compress(self.messages, self.llm)
 
         # 达到最大轮数
         msg = f"⚠️ 达到最大轮数 ({self.max_turns})，任务可能未完成。"
