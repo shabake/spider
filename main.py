@@ -42,9 +42,10 @@ logging.basicConfig(level=logging.WARNING)
 cli = SpiderCLI()
 
 
-def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False):
+def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True):
     """创建预配置的 Agent 实例"""
-    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None, strategy_mode=strategy_mode)
+    agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
+                  strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
 
     memory = MemoryStore(db_path, llm=agent.llm) if db_path else MemoryStore(llm=agent.llm)
     agent.memory = memory
@@ -147,18 +148,18 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     return agent
 
 
-async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False):
+async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True):
     """执行单次任务"""
     try:
-        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode)
+        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
         await agent.run(task, cli=cli)
     except AuthError as e:
         print(f"\n{e}")
 
 
-async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False):
+async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True):
     """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
-    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode)
+    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
 
     # 预加载 MCP，获取连接信息
     mcp_info = "无"
@@ -270,8 +271,12 @@ def main():
                         help="SQLite 数据库路径 (默认 <项目根>/spider_memory.db)")
     parser.add_argument("--strategy", action="store_true",
                         help="启用 StraTA 战略推理模式")
+    parser.add_argument("-y", "--no-confirm", action="store_true",
+                        help="跳过所有操作确认（谨慎使用）")
 
     args = parser.parse_args()
+
+    confirm_enabled = not args.no_confirm
 
     if args.api_key:
         os.environ["DEEPSEEK_API_KEY"] = args.api_key
@@ -290,18 +295,23 @@ def main():
         cli.muted(f"Web UI  →  http://{args.host}:{args.port}")
         if args.strategy:
             cli.muted("🧠 战略推理模式已启用")
+        if args.no_confirm:
+            cli.muted("⚡ 确认模式已关闭（所有操作自动放行）")
         cli.blank()
-        # 传递 strategy_mode 给 web app
+        # 传递配置给 web app
         app.state.strategy_mode = args.strategy
+        app.state.confirm_enabled = confirm_enabled
         uvicorn.run(app, host=args.host, port=args.port)
         return
 
     task = " ".join(args.task) if args.task else ""
 
     if args.interactive or (not task):
-        asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path, strategy_mode=args.strategy))
+        asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path,
+                                      strategy_mode=args.strategy, confirm_enabled=confirm_enabled))
     else:
-        asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path, strategy_mode=args.strategy))
+        asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path,
+                              strategy_mode=args.strategy, confirm_enabled=confirm_enabled))
 
 
 if __name__ == "__main__":

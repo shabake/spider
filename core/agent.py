@@ -63,7 +63,7 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
 
     def __init__(self, model="deepseek-v4-flash", max_turns=30,
                  api_key=None, base_url=None, memory_store=None,
-                 strategy_mode=False):
+                 strategy_mode=False, confirm_enabled=True):
         self.llm = LLM(model=model, api_key=api_key, base_url=base_url)
         self.tools = ToolRegistry()
         self.skill_manager = SkillManager()
@@ -78,6 +78,7 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         self.context = ContextManager(model=model)  # 上下文管理器
         self._usage = None  # 最新 token 用量
         self.strategy_mode = strategy_mode  # StraTA 战略推理模式
+        self.confirm_enabled = confirm_enabled  # 人机交互确认开关
 
         # 持久化记忆工具
         if self.memory:
@@ -147,6 +148,10 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         risk = self.tools.get_risk_level(name)
         if risk == "safe":
             return True
+
+        # 用户关闭了确认模式 — safe/confirm 都放行，dangerous 仍拦截
+        if not self.confirm_enabled:
+            return risk != "dangerous"
 
         # 构建确认信息
         args_str = ", ".join(f"{k}={v}" for k, v in tool_call.get("arguments", {}).items())

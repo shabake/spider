@@ -521,6 +521,9 @@ async function init() {
         } else if (data.strategy_mode) {
             statusDot.className = 'status-dot';
             statusText.textContent = '🧠 战略推理';
+        } else if (!data.confirm_enabled) {
+            statusDot.className = 'status-dot';
+            statusText.textContent = '⚡ 无确认';
         }
         // 设置面板中显示推理模式状态
         const strategyStatus = document.getElementById('strategy-status');
