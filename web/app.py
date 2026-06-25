@@ -21,6 +21,7 @@ from core.llm import AuthError
 from core.memory import MemoryStore
 from core.sub_agent import SubAgentPool, DELEGATE_TASK_SCHEMA
 from core.skill_manager import SkillManager, SAVE_SKILL_SCHEMA, LIST_SKILLS_SCHEMA
+from core.mcp_client import MCPManager
 from tools.shell import execute_shell, SHELL_TOOL_SCHEMA
 from tools.read_write import read_file, write_file, list_files, READ_FILE_SCHEMA, WRITE_FILE_SCHEMA, LIST_FILES_SCHEMA
 from tools.convert import docx_to_pdf, pdf_to_docx, DOCX_TO_PDF_SCHEMA, PDF_TO_DOCX_SCHEMA
@@ -147,6 +148,11 @@ def _create_agent():
         "【自开发】自动提交代码变更到 git。自动 add→commit。",
         self_commit, SELF_COMMIT_SCHEMA,
     )
+
+    # MCP 服务器（从 mcp_servers.json 加载）
+    mcp_config = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_servers.json")
+    if os.path.exists(mcp_config):
+        agent.mcp_manager = MCPManager(config_path=mcp_config)
 
     return agent
 

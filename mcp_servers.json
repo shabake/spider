@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "computer-use",
+      "description": "通过鼠标、键盘和截图控制电脑",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "computer-use-mcp"],
+      "enabled": true
+    }
+  ]
+}

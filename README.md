@@ -32,6 +32,7 @@ python main.py --web
 | 记忆系统 | SQLite + FTS5 + 向量语义搜索 | ✅ |
 | Web UI | FastAPI + SSE，Claude 风格深色主题 | ✅ |
 | 自开发 | self_find / self_edit / self_commit 等 | ✅ |
+| MCP 扩展 | 支持社区 MCP 协议服务（computer-use 等） | ✅ |
 | Human-in-the-Loop | 关键操作确认 | 🔄 |
 | 多 LLM 切换 | DeepSeek / OpenAI / Claude | 📅 |
 | 平台适配 | 飞书 / Discord / Telegram | 📅 |

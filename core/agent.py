@@ -56,6 +56,7 @@ class Agent:
         self._start_time = None
         self._conv_id = None  # 当前会话 ID
         self._step_skills = []  # 匹配到的带步骤的技能
+        self.mcp_manager = None  # MCPManager 实例（由 create_agent 注入）
 
         # 持久化记忆工具
         if self.memory:
@@ -97,6 +98,18 @@ class Agent:
     async def _save_memory_wrapper(self, content: str, category: str = "general"):
         """包装 save_memory，自动记录来源会话 ID"""
         return await self.memory.save_memory(content, category, source_conv_id=self._conv_id)
+
+    async def _load_mcp(self):
+        """首次运行时加载 MCP 工具"""
+        if not self.mcp_manager:
+            return
+        try:
+            await self.mcp_manager.load_config()
+            self.mcp_manager.register_to(self.tools)
+            self._mcp_loaded = True
+        except Exception as e:
+            logger.warning(f"  ⚠️  MCP 加载失败: {e}")
+            self._mcp_loaded = True  # 避免重试
 
     def _setup_messages(self, task: str):
         """初始化消息列表，自动匹配技能 + 注入相关记忆"""
@@ -189,6 +202,10 @@ class Agent:
         Returns:
             最终回复内容
         """
+        # 首次运行时加载 MCP 工具
+        if self.mcp_manager and not hasattr(self, '_mcp_loaded'):
+            await self._load_mcp()
+
         self._setup_messages(task)
         self._turn = 0
         self._start_time = datetime.now()
