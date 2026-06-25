@@ -758,6 +758,22 @@ body {
     height: 18px;
 }
 
+/* 停止按钮 */
+#stop-btn {
+    background: #e74c3c;
+}
+#stop-btn:hover {
+    background: #c0392b;
+}
+#stop-btn.hidden {
+    display: none;
+}
+
+/* 通用隐藏 */
+.hidden {
+    display: none;
+}
+
 .input-hint {
     max-width: 820px;
     margin: 6px auto 0;

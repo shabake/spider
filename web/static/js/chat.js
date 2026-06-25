@@ -5,6 +5,7 @@ let currentConvId = null;
 let loadingHistory = false;
 let confirmResolver = null;  // 用于 Human-in-the-Loop 确认
 let streamContent = '';      // 流式内容累积
+let isRunning = false;       // 是否正在执行
 
 // ── DOM 引用 ─────────────────────────────────
 
@@ -13,6 +14,7 @@ const $$ = (s) => document.querySelectorAll(s);
 const chatArea = $('#chat-area');
 const inputArea = $('#task-input');
 const sendBtn = $('#send-btn');
+const stopBtn = $('#stop-btn');
 const convList = $('#conv-list');
 const statusDot = $('#status-dot');
 const statusText = $('#status-text');
@@ -315,16 +317,48 @@ function showError(msg) {
 }
 
 function setLoading(loading) {
+    isRunning = loading;
     sendBtn.disabled = loading;
     inputArea.disabled = loading;
     if (loading) {
+        sendBtn.classList.add('hidden');
+        stopBtn.classList.remove('hidden');
         statusDot.style.background = 'var(--orange)';
         statusText.textContent = '运行中';
     } else {
+        sendBtn.classList.remove('hidden');
+        stopBtn.classList.add('hidden');
         statusDot.style.background = 'var(--green)';
         statusText.textContent = '就绪';
     }
 }
+
+// ── 停止按钮 ─────────────────────────────────
+
+stopBtn.addEventListener('click', function() {
+    if (!isRunning) return;
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
+    // 移除 thinking indicator
+    removeThinking();
+    // 显示已取消
+    const streamMsg = document.getElementById('stream-msg');
+    if (streamMsg) {
+        const bubble = streamMsg.querySelector('.bubble');
+        if (bubble) {
+            const typing = bubble.querySelector('.typing-indicator');
+            if (typing) typing.remove();
+            const cancelMsg = document.createElement('div');
+            cancelMsg.style.cssText = 'color:var(--text-muted);font-style:italic;padding:12px 0;';
+            cancelMsg.textContent = '⏹️ 已取消';
+            bubble.appendChild(cancelMsg);
+        }
+        streamMsg.id = `msg-${Date.now()}`;
+    }
+    setLoading(false);
+});
 
 function scrollToBottom() {
     requestAnimationFrame(() => {

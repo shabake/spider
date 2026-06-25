@@ -2,11 +2,11 @@
   "servers": [
     {
       "name": "computer-use",
-      "description": "通过鼠标、键盘和截图控制电脑",
+      "description": "通过鼠标、键盘和截图控制电脑（需多模态模型如 Claude）",
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "computer-use-mcp"],
-      "enabled": true
+      "enabled": false
     }
   ]
 }
