@@ -2,16 +2,13 @@
 
 **轻量级 Agent 系统 — 仿 Hermes 设计模式的学习项目**
 
-通过复刻 Hermes Agent 的核心设计模式（ReAct 循环、Tool Use、子代理、技能系统），
-深入理解自主 Agent 系统的架构设计。
+通过复刻 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的核心设计模式（ReAct 循环、Tool Use、子代理、技能系统），深入理解自主 Agent 系统的架构设计。
 
 ## 快速开始
 
 ```bash
-cd /Users/mac/Desktop/Project/spider
-
 # 安装依赖
-pip install -r requirements.txt
+pip install openai pyyaml rich
 
 # 设置 API Key
 export DEEPSEEK_API_KEY="sk-xxxx"
@@ -19,74 +16,37 @@ export DEEPSEEK_API_KEY="sk-xxxx"
 # 交互式 CLI
 python main.py -i
 
-# 单次任务
-python main.py "帮我看看当前目录有哪些文件"
-
 # Web UI
 python main.py --web
-open http://127.0.0.1:8888
+# 访问 http://127.0.0.1:8888
 ```
 
-## 功能一览
+## 能力一览
 
-### Phase 1 — Agent 核心
-- ✅ **ReAct 循环**：思考 → 行动 → 观察，迭代解决问题
-- ✅ **Tool Use**：统一的工具注册和执行系统（JSON Schema）
-- ✅ **流式输出**：SSE 实时推送思考过程
-- ✅ **CLI 双模式**：交互式 + 单次任务
+| 功能 | 说明 | 状态 |
+|------|------|------|
+| ReAct 循环 | 思考→行动→观察，最大 30 轮 | ✅ |
+| Tool Use | shell、文件读写、文档转换等 18 个工具 | ✅ |
+| 子代理 | 任务拆解，并行执行，最多 3 个并发 | ✅ |
+| 技能系统 | 经验保存为 YAML，关键词触发自动匹配 | ✅ |
+| 记忆系统 | SQLite + FTS5 + 向量语义搜索 | ✅ |
+| Web UI | FastAPI + SSE，Claude 风格深色主题 | ✅ |
+| 自开发 | self_find / self_edit / self_commit 等 | ✅ |
+| Human-in-the-Loop | 关键操作确认 | 🔄 |
+| 多 LLM 切换 | DeepSeek / OpenAI / Claude | 📅 |
+| 平台适配 | 飞书 / Discord / Telegram | 📅 |
 
-### Phase 2 — 子代理 & 技能
-- ✅ **子代理 (SubAgent)**：任务拆解、并行执行、上下文隔离
-- ✅ **技能系统 (Skill Manager)**：经验保存为 YAML、关键词匹配自动触发
-- ✅ **记忆系统**：SQLite 持久化 + FTS5 全文搜索 + 语义向量检索
+## 文档
 
-### Phase 3 — Web UI
-- ✅ **FastAPI 后端**：REST API + SSE 实时推送
-- ✅ **Claude 风格前端**：深色主题、Markdown 渲染、代码高亮
-- ✅ **对话历史管理**：浏览、加载、删除历史对话
-- ✅ **工具调用可视化**：可折叠的参数/结果面板
+详细文档请见 [docs/](docs/index.md) 目录（MkDocs 文档站）：
 
-### Phase 4 — 进行中
-- 🔄 **Human-in-the-Loop**：关键操作前暂停等待用户确认
-- 🔄 **平台适配器**：统一接口，支持 Web / CLI / 飞书 / Discord
-- 🔄 **多 LLM 切换**：DeepSeek / OpenAI / Anthropic / Ollama
-
-## 架构
-
-```
-Spider/
-├── main.py              # 入口 CLI + Banner
-├── core/                # 核心引擎
-│   ├── agent.py         # Agent 循环 (ReAct)
-│   ├── llm.py           # LLM 封装 (流式 + embedding)
-│   ├── tool_registry.py # 工具注册中心
-│   ├── sub_agent.py     # 子代理系统
-│   ├── skill_manager.py # 技能管理器
-│   └── memory.py        # 持久化记忆 (SQLite + FTS5 + 向量)
-├── tools/               # 内置工具
-│   ├── shell.py         # Shell 执行
-│   ├── read_write.py    # 文件读写
-│   ├── convert.py       # 文档转换 (docx/pdf)
-│   └── self_dev.py      # 自开发工具 (find/map/review/edit/commit)
-├── web/                 # Web UI
-│   ├── app.py           # FastAPI 后端 + SSE
-│   ├── static/          # 前端静态文件
-│   └── templates/       # HTML 模板
-├── platforms/           # 平台适配器 (进行中)
-├── skills/              # 技能文件 (YAML)
-└── logs/                # 开发日志
-```
-
-## 设计参考
-
-| Hermes 模式 | Spider 实现 |
-|------------|-------------|
-| ReAct 循环 | `Agent.run()` — 思考→工具→观察→循环 |
-| Tool System | `ToolRegistry` — JSON Schema 驱动的工具注册 |
-| Delegation | `SubAgentPool` — 子代理并发执行 |
-| Skill System | `SkillManager` — YAML 技能文件 + 关键词匹配 |
-| Memory | `MemoryStore` — SQLite + FTS5 + 向量语义检索 |
-| Platform Adapters | `platforms/` — 进行中 |
+- [快速开始](docs/快速开始.md) — 安装、配置、运行
+- [使用指南](docs/使用指南.md) — 三种模式、场景示例、FAQ
+- [架构设计](docs/架构设计.md) — 三层架构、数据流、模块依赖
+- [核心模块](docs/核心模块.md) — Agent / LLM / 工具 / 子代理 / 技能 / 记忆
+- [工具集](docs/工具集.md) — Shell / 文件 / 转换 / 自开发
+- [设计模式](docs/设计模式.md) — Hermes 对照参考
+- [路线图](docs/路线图.md) — 后续开发计划
 
 ## 环境变量
 
@@ -95,3 +55,9 @@ Spider/
 | `DEEPSEEK_API_KEY` | — | DeepSeek API Key（必填） |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | API 地址 |
 | `DEEPSEEK_EMBEDDING_MODEL` | `deepseek-embedding` | Embedding 模型 |
+
+## 参考
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — 主要设计参考
+- [OpenAI Function Calling](https://platform.openai.com/docs/guides/function-calling)
+- [DeepSeek API](https://api-docs.deepseek.com/)

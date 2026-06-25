@@ -10,3 +10,9 @@ __pycache__/
 
 # 系统
 .DS_Store
+
+# MkDocs 构建输出
+site/
+
+# 备份
+.backup/
