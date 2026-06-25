@@ -142,8 +142,21 @@ async def run_task(task: str, api_key=None, base_url=None, db_path=None):
 
 
 async def interactive_mode(api_key=None, base_url=None, db_path=None):
-    """交互式模式 — Claude Code 风格，Escape 取消当前任务"""
+    """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
     agent = create_agent(api_key, base_url, db_path)
+
+    # 预加载 MCP，获取连接信息
+    mcp_info = "无"
+    if agent.mcp_manager:
+        cli.info("🔌 正在连接 MCP 服务器...")
+        try:
+            await agent._load_mcp()
+            mcp_info = agent.mcp_manager.summary()
+        except Exception:
+            mcp_info = "加载失败"
+
+    # 显示欢迎信息
+    cli.welcome(mcp_info=mcp_info)
 
     while True:
         task = cli.input_prompt()
@@ -152,17 +165,33 @@ async def interactive_mode(api_key=None, base_url=None, db_path=None):
         if task in ("/quit", "quit", "exit", "退出"):
             cli.exit_message()
             break
+        if task == "/tools":
+            cli.display_response("**可用工具：**\n" + format_tools(agent))
+            continue
+        if task == "/skills":
+            cli.display_response(agent.skill_manager.list())
+            continue
+        if task in ("/help", "/h"):
+            cli.display_response(
+                "**可用命令：**\n\n"
+                "| 命令 | 说明 |\n"
+                "|------|------|\n"
+                "| `/tools` | 查看所有可用工具 |\n"
+                "| `/skills` | 查看已保存的技能 |\n"
+                "| `/help` | 显示此帮助 |\n"
+                "| `quit` | 退出 |\n"
+                "| `⎋ Esc` | 取消当前任务 |"
+            )
+            continue
 
         try:
-            # 启动 Escape 监听，支持取消
             cli.watch_abort()
 
-            # agent.run 期间检测 Escape
             async def run_with_abort():
                 async def check_abort():
                     while not cli.abort_pressed():
                         await asyncio.sleep(0.1)
-                # 同时跑 agent 和检查
+
                 run_task = asyncio.create_task(agent.run(task, cli=cli))
                 check_task = asyncio.create_task(check_abort())
                 done, pending = await asyncio.wait(
@@ -177,16 +206,37 @@ async def interactive_mode(api_key=None, base_url=None, db_path=None):
                 check_task.cancel()
                 return await run_task
 
+            # 执行
             result = await run_with_abort()
             if result == "CANCELLED":
-                cli.muted("已取消 (按 Esc)")
+                cli.muted("⎋ 已取消")
+            else:
+                # 显示统计
+                elapsed = agent._elapsed()
+                cli.display_stats(agent._turn, elapsed)
+
         except AuthError as e:
             print(f"\n{e}")
         except asyncio.CancelledError:
-            cli.muted("已取消 (按 Esc)")
+            cli.muted("⎋ 已取消")
         finally:
             cli.stop_abort()
             cli.drain_stdin()
+
+
+def format_tools(agent) -> str:
+    """格式化工具列表为 markdown 表格"""
+    from core.tool_registry import ToolRegistry
+    schemas = agent.tools.schemas
+    lines = ["| 工具 | 说明 | 类型 |", "|------|------|------|"]
+    for s in schemas:
+        fn = s["function"]
+        name = fn["name"]
+        is_mcp = name.startswith("mcp_")
+        ttype = "🔌 MCP" if is_mcp else "🛠️  内置"
+        desc = fn.get("description", "")[:60]
+        lines.append(f"| `{name}` | {desc} | {ttype} |")
+    return "\n".join(lines)
 
 
 def main():

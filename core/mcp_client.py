@@ -125,13 +125,23 @@ class MCPServer:
             self._pending.pop(req_id, None)
             raise MCPToolCallError(f"工具 '{name}' 调用超时")
 
-        # 提取文本内容
+        # 提取文本和图片内容
         parts = []
         for item in result.get("content", []):
-            if item.get("type") == "text":
+            t = item.get("type", "")
+            if t == "text":
                 parts.append(item.get("text", ""))
-            elif item.get("type") == "resource":
-                parts.append(str(item.get("resource", "")))
+            elif t == "image":
+                img_data = item.get("data", "")
+                if img_data:
+                    parts.append(f"[图片: {item.get('mimeType', 'image/png')} base64数据 {len(img_data)}字符]")
+            elif t == "resource":
+                r = item.get("resource", {})
+                blob = r.get("blob", "")
+                if blob:
+                    parts.append(f"[资源: {r.get('blobType', 'unknown')} {len(blob)}字符]")
+                else:
+                    parts.append(str(r))
         return "\n".join(parts)
 
     # ── 内部方法 ──────────────────────────────
@@ -190,28 +200,36 @@ class MCPServer:
         self._writer.write(line.encode())
 
     async def _read_loop(self):
-        """持续读取 stdout 的 JSON-RPC 响应"""
+        """持续读取 stdout 的 JSON-RPC 响应（支持大负载）"""
+        buffer = ""
+        decoder = json.JSONDecoder()
         try:
             while self._running and self._reader:
-                line = await self._reader.readline()
-                if not line:
+                chunk = await self._reader.read(65536)
+                if not chunk:
                     break
-                try:
-                    msg = json.loads(line.decode().strip())
-                except json.JSONDecodeError:
-                    continue
+                buffer += chunk.decode()
 
-                msg_id = msg.get("id")
-                if msg_id is not None and msg_id in self._pending:
-                    future = self._pending.pop(msg_id)
-                    if "result" in msg:
-                        future.set_result(msg["result"])
-                    elif "error" in msg:
-                        future.set_exception(
-                            MCPToolCallError(msg["error"].get("message", "未知错误"))
-                        )
-        except Exception:
-            logger.debug(f"[MCP/{self.name}] 读取循环结束")
+                # 从缓冲区中提取所有完整的 JSON 消息
+                while buffer.strip():
+                    buffer = buffer.lstrip()
+                    try:
+                        msg, idx = decoder.raw_decode(buffer)
+                        buffer = buffer[idx:]
+                    except json.JSONDecodeError:
+                        break  # 需要更多数据
+
+                    msg_id = msg.get("id")
+                    if msg_id is not None and msg_id in self._pending:
+                        future = self._pending.pop(msg_id)
+                        if "result" in msg:
+                            future.set_result(msg["result"])
+                        elif "error" in msg:
+                            future.set_exception(
+                                MCPToolCallError(msg["error"].get("message", "未知错误"))
+                            )
+        except Exception as e:
+            logger.debug(f"[MCP/{self.name}] 读取循环结束: {e}")
         finally:
             self._running = False
             for future in self._pending.values():
