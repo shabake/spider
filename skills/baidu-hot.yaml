@@ -1,0 +1,35 @@
+name: baidu-hot
+description: 获取百度热搜榜前30条，标题+链接+简介
+trigger: 热搜|百度热搜|baidu hot|热点|热榜|今天热点
+prompt: |
+  将热搜结果以清晰格式呈现给用户。
+steps:
+  - name: 获取百度热搜
+    tool: shell
+    params:
+      command: >
+        curl -s --max-time 8 "https://top.baidu.com/api/board?tab=realtime"
+        -H "User-Agent: Mozilla/5.0"
+        -H "Referer: https://top.baidu.com/board?tab=realtime"
+        | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        cards = data.get('data', {}).get('cards', [])
+        items = cards[0].get('content', []) if cards else []
+        print(f'🔥 百度热搜榜 TOP{min(30, len(items))}\\n')
+        for i, item in enumerate(items[:30], 1):
+            query = item.get('query', item.get('word', ''))
+            desc = item.get('desc', '')
+            url = item.get('appUrl', item.get('url', ''))
+            hot = item.get('hotScore', '')
+            print(f'{i:2d}. {query}')
+            if desc:
+                print(f'     {desc[:100]}')
+            if url:
+                print(f'     🔗 {url}')
+            print()
+        print(f'--- 共 {len(items)} 条热搜 ---')
+        "
+tools:
+  - shell
+created: 2026-06-25

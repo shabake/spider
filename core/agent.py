@@ -219,7 +219,7 @@ class Agent:
         # 执行技能预制步骤（如果有）
         if self._step_skills:
             if cli:
-                cli.display_info("🔄 执行技能步骤...")
+                cli.info("🔄 执行技能步骤...")
             for skill in self._step_skills:
                 step_results = await self._execute_skill_steps(skill, cli=cli)
                 # 将步骤结果注入到会话上下文
