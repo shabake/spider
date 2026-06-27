@@ -68,8 +68,8 @@ class SubAgentPool:
                 tid = [k for k, v in self._running.items() if v == d][0]
                 self._running.pop(tid, None)
 
-        # 创建子 Agent
-        child = Agent(api_key=self.api_key, base_url=self.base_url)
+        # 创建子 Agent（子 Agent 不弹确认，由主 Agent 管控）
+        child = Agent(api_key=self.api_key, base_url=self.base_url, confirm_enabled=False)
 
         # 应用 Profile（如果有）
         profile_data = None
