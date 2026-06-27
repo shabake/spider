@@ -17,10 +17,14 @@ logger = logging.getLogger("spider")
 # ── 搜索引擎 ──────────────────────────────────────────────
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     HAS_DDG = True
 except ImportError:
-    HAS_DDG = False
+    try:
+        from duckduckgo_search import DDGS
+        HAS_DDG = True
+    except ImportError:
+        HAS_DDG = False
 
 try:
     import httpx

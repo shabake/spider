@@ -106,7 +106,7 @@ def _load_yaml_simple(fpath: str) -> dict:
     return data
 
 
-def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True, profile: dict = None):
+def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True, profile: dict = None, max_turns=30):
     """创建预配置的 Agent 实例
 
     Args:
@@ -127,7 +127,8 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
         prof_overrides = profile.get("risk_overrides", {}) or {}
 
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
-                  strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+                  strategy_mode=strategy_mode, confirm_enabled=confirm_enabled,
+                  max_turns=max_turns)
 
     # 应用 Profile 的 system prompt
     if profile and profile.get("prompt"):
@@ -211,18 +212,18 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     return agent
 
 
-async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None):
+async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30):
     """执行单次任务"""
     try:
-        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile)
+        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns)
         await agent.run(task, cli=cli)
     except AuthError as e:
         print(f"\n{e}")
 
 
-async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None):
+async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30):
     """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
-    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile)
+    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns)
 
     # 预加载 MCP，获取连接信息
     mcp_info = "无"
@@ -338,6 +339,8 @@ def main():
                         help="跳过所有操作确认（谨慎使用）")
     parser.add_argument("--profile", default=None,
                         help="角色配置名 (profiles/{name}.yaml)，如 finance、coding")
+    parser.add_argument("--max-turns", type=int, default=30,
+                        help="最大执行轮数（默认 30，大项目可设 100+）")
 
     args = parser.parse_args()
 
@@ -366,6 +369,8 @@ def main():
         cli.muted("🧠 战略推理模式已启用")
     if args.no_confirm:
         cli.muted("⚡ 确认模式已关闭（所有操作自动放行）")
+    if args.max_turns != 30:
+        cli.muted(f"🔄 最大轮数: {args.max_turns}")
     cli.blank()
 
     if args.web:
@@ -391,11 +396,13 @@ def main():
     if args.interactive or (not task):
         asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path,
                                       strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
-                                      profile=profile, profile_name=profile_name))
+                                      profile=profile, profile_name=profile_name,
+                                      max_turns=args.max_turns))
     else:
         asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path,
                               strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
-                              profile=profile, profile_name=profile_name))
+                              profile=profile, profile_name=profile_name,
+                              max_turns=args.max_turns))
 
 
 if __name__ == "__main__":
