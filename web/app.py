@@ -81,6 +81,7 @@ def _create_agent():
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
     plan_mode = getattr(app.state, "plan_mode", False)
+    team_mode = getattr(app.state, "team_mode", False)
     profile = getattr(app.state, "profile", None)
     profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
@@ -90,6 +91,7 @@ def _create_agent():
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
                   strategy_mode=strategy_mode, confirm_enabled=confirm_enabled,
                   plan_mode=plan_mode)
+    agent.team_mode = team_mode
 
     # 应用 Profile 的 system prompt（提前设置，工具等所有工具注册完再处理）
     if profile and profile.get("prompt"):
@@ -99,10 +101,12 @@ def _create_agent():
     agent.memory_store = _memory
     agent._register_memory_tools()
 
-    # 子代理工具
+    # 子代理工具（注入 profile_loader）
+    from main import load_profile
     sub_pool = SubAgentPool(
         api_key=api_key, base_url=base_url,
         tools=agent.tools, parent_agent=agent,
+        profile_loader=load_profile,
     )
     agent.register_tool(
         "delegate_task",
@@ -413,6 +417,7 @@ async def status():
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
     plan_mode = getattr(app.state, "plan_mode", False)
+    team_mode = getattr(app.state, "team_mode", False)
     profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
         confirm_enabled = False
@@ -423,5 +428,6 @@ async def status():
         "strategy_mode": strategy_mode,
         "confirm_enabled": confirm_enabled,
         "plan_mode": plan_mode,
+        "team_mode": team_mode,
         "profile": profile_name,
     }

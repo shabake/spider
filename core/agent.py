@@ -81,6 +81,7 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         self.strategy_mode = strategy_mode  # StraTA 战略推理模式
         self.confirm_enabled = confirm_enabled  # 人机交互确认开关
         self.plan_mode = plan_mode  # Plan-Then-Execute
+        self.team_mode = False  # 团队协作模式（由 --team 在外部设置）
 
         # 持久化记忆工具
         if self.memory:
@@ -239,6 +240,22 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         # StraTA 战略推理模式 — 追加到系统提示
         if self.strategy_mode:
             system += "\n\n" + self.STRATEGY_PROMPT
+
+        # 团队协作模式 — 追加团队协调指令
+        if self.team_mode:
+            system += (
+                "\n\n你是一个项目协调者 (Team Lead)，可以组建团队协作完成任务。\n\n"
+                "你的团队成员（通过 delegate_task 调用）：\n"
+                '  1. coding  — 程序员，擅长编写代码和修复 bug\n'
+                '  2. reviewer — 代码审查员，擅长找出代码问题和安全隐患\n\n'
+                "协作流程建议：\n"
+                "  • 写代码 → 用 profile='coding' 委托\n"
+                "  • 审查代码 → 用 profile='reviewer' 委托\n"
+                "  • 修复审查出的问题 → 用 profile='coding' 委托\n"
+                "  • 汇总结果 → 你自己来做\n\n"
+                "善用并行：多个独立任务可以同时委托给不同角色。\n"
+                "每个子 Agent 完成后会把结果返回给你，由你整合输出。"
+            )
 
         # 注入相关记忆（仅复杂任务自动 recall，简单任务不浪费 token）
         if self.memory and (self.plan_mode or len(task) > 30):
