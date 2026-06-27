@@ -80,6 +80,7 @@ def _create_agent():
     # 读取配置（从 app.state 或环境变量）
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
+    plan_mode = getattr(app.state, "plan_mode", False)
     profile = getattr(app.state, "profile", None)
     profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
@@ -87,7 +88,8 @@ def _create_agent():
 
     # 先创建 Agent（内部初始化 LLM），再用 LLM 初始化 MemoryStore
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
-                  strategy_mode=strategy_mode, confirm_enabled=confirm_enabled)
+                  strategy_mode=strategy_mode, confirm_enabled=confirm_enabled,
+                  plan_mode=plan_mode)
 
     # 应用 Profile 的 system prompt（提前设置，工具等所有工具注册完再处理）
     if profile and profile.get("prompt"):
@@ -410,6 +412,7 @@ async def status():
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     strategy_mode = getattr(app.state, "strategy_mode", False) or os.environ.get("SPIDER_STRATEGY", "").lower() in ("1", "true", "yes")
     confirm_enabled = getattr(app.state, "confirm_enabled", True)
+    plan_mode = getattr(app.state, "plan_mode", False)
     profile_name = getattr(app.state, "profile_name", None)
     if os.environ.get("SPIDER_NO_CONFIRM", "").lower() in ("1", "true", "yes"):
         confirm_enabled = False
@@ -419,5 +422,6 @@ async def status():
         "memory_db": get_memory().db_path if get_memory() else None,
         "strategy_mode": strategy_mode,
         "confirm_enabled": confirm_enabled,
+        "plan_mode": plan_mode,
         "profile": profile_name,
     }

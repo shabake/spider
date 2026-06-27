@@ -106,7 +106,7 @@ def _load_yaml_simple(fpath: str) -> dict:
     return data
 
 
-def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True, profile: dict = None, max_turns=30):
+def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=None, strategy_mode=False, confirm_enabled=True, profile: dict = None, max_turns=30, plan_mode=False):
     """创建预配置的 Agent 实例
 
     Args:
@@ -128,7 +128,7 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
 
     agent = Agent(api_key=api_key, base_url=base_url, memory_store=None,
                   strategy_mode=strategy_mode, confirm_enabled=confirm_enabled,
-                  max_turns=max_turns)
+                  max_turns=max_turns, plan_mode=plan_mode)
 
     # 应用 Profile 的 system prompt
     if profile and profile.get("prompt"):
@@ -212,18 +212,18 @@ def create_agent(api_key=None, base_url="https://api.deepseek.com/v1", db_path=N
     return agent
 
 
-async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30):
+async def run_task(task: str, api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30, plan_mode=False):
     """执行单次任务"""
     try:
-        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns)
+        agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns, plan_mode=plan_mode)
         await agent.run(task, cli=cli)
     except AuthError as e:
         print(f"\n{e}")
 
 
-async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30):
+async def interactive_mode(api_key=None, base_url=None, db_path=None, strategy_mode=False, confirm_enabled=True, profile=None, profile_name=None, max_turns=30, plan_mode=False):
     """交互式模式 — 支持命令历史、Escape 取消、状态显示"""
-    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns)
+    agent = create_agent(api_key, base_url, db_path, strategy_mode=strategy_mode, confirm_enabled=confirm_enabled, profile=profile, max_turns=max_turns, plan_mode=plan_mode)
 
     # 预加载 MCP，获取连接信息
     mcp_info = "无"
@@ -335,6 +335,8 @@ def main():
                         help="SQLite 数据库路径 (默认 <项目根>/spider_memory.db)")
     parser.add_argument("--strategy", action="store_true",
                         help="启用 StraTA 战略推理模式")
+    parser.add_argument("--plan", action="store_true",
+                        help="先规划再执行（复杂任务自动规划）")
     parser.add_argument("-y", "--no-confirm", action="store_true",
                         help="跳过所有操作确认（谨慎使用）")
     parser.add_argument("--profile", default=None,
@@ -367,6 +369,8 @@ def main():
         cli.muted(f"👤 Profile: {display_name}")
     if args.strategy:
         cli.muted("🧠 战略推理模式已启用")
+    if args.plan:
+        cli.muted("📋 先规划再执行（复杂任务自动启用）")
     if args.no_confirm:
         cli.muted("⚡ 确认模式已关闭（所有操作自动放行）")
     if args.max_turns != 30:
@@ -386,6 +390,7 @@ def main():
         # 传递配置给 web app
         app.state.strategy_mode = args.strategy
         app.state.confirm_enabled = confirm_enabled
+        app.state.plan_mode = args.plan
         app.state.profile = profile
         app.state.profile_name = profile_name
         uvicorn.run(app, host=args.host, port=args.port)
@@ -397,12 +402,12 @@ def main():
         asyncio.run(interactive_mode(args.api_key, args.base_url, args.db_path,
                                       strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
                                       profile=profile, profile_name=profile_name,
-                                      max_turns=args.max_turns))
+                                      max_turns=args.max_turns, plan_mode=args.plan))
     else:
         asyncio.run(run_task(task, args.api_key, args.base_url, args.db_path,
                               strategy_mode=args.strategy, confirm_enabled=confirm_enabled,
                               profile=profile, profile_name=profile_name,
-                              max_turns=args.max_turns))
+                              max_turns=args.max_turns, plan_mode=args.plan))
 
 
 if __name__ == "__main__":

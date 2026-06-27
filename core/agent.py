@@ -63,7 +63,8 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
 
     def __init__(self, model="deepseek-v4-flash", max_turns=30,
                  api_key=None, base_url=None, memory_store=None,
-                 strategy_mode=False, confirm_enabled=True):
+                 strategy_mode=False, confirm_enabled=True,
+                 plan_mode=False):
         self.llm = LLM(model=model, api_key=api_key, base_url=base_url)
         self.tools = ToolRegistry()
         self.skill_manager = SkillManager()
@@ -79,6 +80,7 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         self._usage = None  # 最新 token 用量
         self.strategy_mode = strategy_mode  # StraTA 战略推理模式
         self.confirm_enabled = confirm_enabled  # 人机交互确认开关
+        self.plan_mode = plan_mode  # Plan-Then-Execute
 
         # 持久化记忆工具
         if self.memory:
@@ -184,6 +186,40 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         # fallback：没有 CLI 也没有 Web，直接放行
         return True
 
+    @staticmethod
+    def _is_complex_task(task: str) -> bool:
+        """判断任务是否复杂，需要先规划再执行"""
+        if not task:
+            return False
+        # 长任务（超过 80 字）
+        if len(task) > 80:
+            return True
+        # 包含多个要求（换行、数字列表、或中文顿号分隔）
+        indicators = ["\n", "1.", "2.", "、", "并且", "同时", "分别", "先", "然后", "最后"]
+        return any(ind in task for ind in indicators)
+
+    async def _make_plan(self, task: str) -> str:
+        """生成执行计划"""
+        plan_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "你是一个任务规划专家。分析以下任务，输出一个清晰的执行计划。\n"
+                    "格式要求：\n"
+                    "  1. 第一步：xxx\n"
+                    "  2. 第二步：xxx\n"
+                    "  ...\n\n"
+                    "只输出计划，不需要额外解释。"
+                ),
+            },
+            {"role": "user", "content": f"任务：{task}"},
+        ]
+        try:
+            resp = self.llm.think(plan_prompt)
+            return resp.content or "(计划生成失败)"
+        except Exception as e:
+            return f""
+
     async def _load_mcp(self):
         """首次运行时加载 MCP 工具"""
         if not self.mcp_manager:
@@ -204,8 +240,8 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         if self.strategy_mode:
             system += "\n\n" + self.STRATEGY_PROMPT
 
-        # 注入相关记忆（自动 recall）
-        if self.memory:
+        # 注入相关记忆（仅复杂任务自动 recall，简单任务不浪费 token）
+        if self.memory and (self.plan_mode or len(task) > 30):
             memories = self.memory.recall(task, limit=3)
             if memories:
                 system += f"\n\n📖 相关记忆:\n{memories}"
@@ -326,6 +362,23 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
                     "content": f"以下是根据技能「{skill.name}」自动执行的结果：\n\n{step_results}"
                 })
 
+        # ── Plan-Then-Execute ──────────────────────────────────
+        if self.plan_mode and self._is_complex_task(task):
+            if cli:
+                cli.info("📋 正在制定执行计划...")
+            plan = await self._make_plan(task)
+            if plan:
+                # 将计划注入上下文
+                self.messages.insert(-1, {
+                    "role": "system",
+                    "content": f"以下是执行计划，请按步骤执行：\n\n{plan}"
+                })
+                if cli:
+                    cli.muted(f"📋 执行计划已生成")
+                    for line in plan.strip().split("\n"):
+                        if line.strip():
+                            cli.muted(f"  {line.strip()}")
+
         if on_event and on_event.get("turn_start"):
             await on_event["turn_start"](0, self.max_turns)
 
@@ -362,41 +415,45 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
                     await on_event["done"](content, elapsed)
                 return content
 
-            # 执行工具
+            # ── 执行工具（支持并行） ──────────────────────────────
             tool_call_content = response.get("content", "")
-            for tc in response["tool_calls"]:
+            tcs = response["tool_calls"]
+            reasoning_rc = response.get("reasoning_content")
+
+            # 1. 显示所有工具调用
+            for tc in tcs:
                 if cli:
                     cli.display_tool_call(tc["name"], tc["arguments"])
                 if on_event and on_event.get("tool_call"):
                     await on_event["tool_call"](tc["name"], tc["arguments"])
 
-                # 风险确认检查（Human-in-the-Loop）
-                if not await self._confirm_tool(tc, cli=cli, on_event=on_event):
-                    result = "❌ 已取消：用户拒绝了此操作"
-                    if cli:
-                        cli.display_tool_result(result)
-                    if on_event and on_event.get("tool_result"):
-                        await on_event["tool_result"](tc["name"], result)
+            # 2. 风险确认检查（串行，每个都需要用户操作）
+            approved = []
+            for tc in tcs:
+                ok = await self._confirm_tool(tc, cli=cli, on_event=on_event)
+                approved.append(ok)
 
-                    # 将拒绝结果加入对话
-                    args_str = json.dumps(tc["arguments"], ensure_ascii=False)
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [{
-                            "id": tc["id"],
-                            "type": "function",
-                            "function": {"name": tc["name"], "arguments": args_str},
-                        }]
-                    })
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
-                    })
-                    continue
+            # 3. 并行执行所有通过的工具
+            run_indices = [i for i, ok in enumerate(approved) if ok]
+            if run_indices:
+                async def _run_one(i):
+                    return await self.tools.execute(tcs[i])
 
-                result = await self.tools.execute(tc)
+                done = await asyncio.gather(*[_run_one(i) for i in run_indices])
+                results_map = dict(zip(run_indices, done))
+            else:
+                results_map = {}
+
+            results = []
+            for i in range(len(tcs)):
+                if i in results_map:
+                    results.append(results_map[i])
+                else:
+                    results.append("❌ 已取消：用户拒绝了此操作")
+
+            # 4. 显示结果 + 追加到对话
+            for i, tc in enumerate(tcs):
+                result = results[i]
 
                 if cli:
                     cli.display_tool_result(result)
@@ -414,9 +471,8 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
                         "function": {"name": tc["name"], "arguments": args_str},
                     }]
                 }
-                rc = response.get("reasoning_content")
-                if rc:
-                    msg["reasoning_content"] = rc
+                if reasoning_rc:
+                    msg["reasoning_content"] = reasoning_rc
                 self.messages.append(msg)
                 self.messages.append({
                     "role": "tool",
