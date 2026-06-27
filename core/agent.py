@@ -152,9 +152,9 @@ Prioritize practical usefulness, local context, commercial effect, feasibility, 
         if risk == "safe":
             return True
 
-        # 用户关闭了确认模式 — safe/confirm 都放行，dangerous 仍拦截
+        # 用户关闭了确认模式 — 所有工具直接放行
         if not self.confirm_enabled:
-            return risk != "dangerous"
+            return True
 
         # 构建确认信息
         args_str = ", ".join(f"{k}={v}" for k, v in tool_call.get("arguments", {}).items())
